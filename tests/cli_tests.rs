@@ -18,7 +18,7 @@ fn test_cli_help() {
         .assert()
         .success()
         .stdout(predicate::str::contains(
-            "Create and extract zstd-compressed tar archives",
+            "Create and extract archives in multiple formats",
         ))
         .stdout(predicate::str::contains("Commands:"))
         .stdout(predicate::str::contains("compress"))
@@ -42,7 +42,7 @@ fn test_compress_help() {
         .assert()
         .success()
         .stdout(predicate::str::contains(
-            "compress files/directories to .zst",
+            "compress files/directories (supports",
         ))
         .stdout(predicate::str::contains("--level"))
         .stdout(predicate::str::contains("--output"))

@@ -21,6 +21,24 @@ pub fn calculate_dir_size(path: &Path) -> Result<u64> {
     Ok(total)
 }
 
+/// calculate total size of a directory with file filtering
+pub fn calculate_directory_size(path: &Path, filter: &crate::filter::FileFilter) -> Result<u64> {
+    let mut total = 0;
+
+    if path.is_file() {
+        return Ok(path.metadata()?.len());
+    }
+
+    for entry in walkdir::WalkDir::new(path) {
+        let entry = entry?;
+        if entry.file_type().is_file() && filter.should_include(entry.path()) {
+            total += entry.metadata()?.len();
+        }
+    }
+
+    Ok(total)
+}
+
 /// format bytes in human-readable format
 pub fn format_bytes(bytes: u64) -> String {
     const UNITS: &[&str] = &["B", "KiB", "MiB", "GiB", "TiB"];

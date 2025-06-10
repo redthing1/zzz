@@ -9,6 +9,7 @@ use crate::Result;
 use anyhow::Context;
 use std::fs::File;
 use std::io;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use tar::Builder;
@@ -31,7 +32,10 @@ impl ZstdFormat {
         header.set_mode(if options.normalize_permissions {
             NORMALIZED_FILE_MODE
         } else {
-            metadata.permissions().mode()
+            #[cfg(unix)]
+            { metadata.permissions().mode() }
+            #[cfg(not(unix))]
+            { NORMALIZED_FILE_MODE }
         });
 
         Self::apply_header_normalization(&mut header, metadata, options)?;
@@ -50,7 +54,10 @@ impl ZstdFormat {
         header.set_mode(if options.normalize_permissions {
             NORMALIZED_DIR_MODE
         } else {
-            metadata.permissions().mode()
+            #[cfg(unix)]
+            { metadata.permissions().mode() }
+            #[cfg(not(unix))]
+            { NORMALIZED_DIR_MODE }
         });
 
         Self::apply_header_normalization(&mut header, metadata, options)?;

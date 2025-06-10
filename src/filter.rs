@@ -108,6 +108,11 @@ impl FileFilter {
 
         false
     }
+
+    /// check if a path should be included in archiving (inverse of should_exclude)
+    pub fn should_include(&self, path: &Path) -> bool {
+        !self.should_exclude(path)
+    }
 }
 
 #[cfg(test)]

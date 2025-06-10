@@ -1,6 +1,8 @@
 .claude
 CLAUDE*
 claude/
+test_*
+test.*
 
 # Created by https://www.toptal.com/developers/gitignore/api/linux,macos,rust,visualstudiocode,python
 # Edit at https://www.toptal.com/developers/gitignore?templates=linux,macos,rust,visualstudiocode,python

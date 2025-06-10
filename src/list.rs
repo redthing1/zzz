@@ -1,17 +1,33 @@
 //! archive listing functionality
 
-use crate::formats::zstd::ZstdFormat;
-use crate::formats::CompressionFormat;
+use crate::formats::{
+    gz::GzipFormat, sevenz::SevenZFormat, xz::XzFormat, zip::ZipFormat, zstd::ZstdFormat,
+    CompressionFormat, Format,
+};
 use crate::Result;
 use std::path::Path;
 
-/// list contents of a .zst archive
+/// list contents of an archive using auto-detected format
 pub fn list(archive_path: &Path, verbose: bool) -> Result<()> {
     if verbose {
         println!("listing contents of {}", archive_path.display());
     }
 
-    let entries = ZstdFormat::list(archive_path)?;
+    // detect format from archive
+    let format = Format::detect(archive_path)?;
+
+    if verbose {
+        println!("detected {} format", format.name());
+    }
+
+    // dispatch to appropriate format implementation
+    let entries = match format {
+        Format::Zstd => ZstdFormat::list(archive_path)?,
+        Format::Gzip => GzipFormat::list(archive_path)?,
+        Format::Xz => XzFormat::list(archive_path)?,
+        Format::Zip => ZipFormat::list(archive_path)?,
+        Format::SevenZ => SevenZFormat::list(archive_path)?,
+    };
 
     for entry in entries {
         if verbose {

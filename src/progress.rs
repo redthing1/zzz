@@ -34,6 +34,20 @@ impl Progress {
         }
     }
 
+    /// set the current position
+    pub fn set_position(&self, pos: u64) {
+        if let Some(bar) = &self.bar {
+            bar.set_position(pos);
+        }
+    }
+
+    /// set the total length
+    pub fn set_length(&self, len: u64) {
+        if let Some(bar) = &self.bar {
+            bar.set_length(len);
+        }
+    }
+
     /// finish progress with a message
     pub fn finish_with_message(&self, msg: &str) {
         if let Some(bar) = &self.bar {

@@ -8,7 +8,7 @@ use std::path::PathBuf;
     name = "zzz",
     version,
     about = "zzz: compression multitool",
-    long_about = "Create and extract zstd-compressed tar archives with smart file filtering"
+    long_about = "Create and extract archives in multiple formats (zst, tgz, txz, zip, 7z) with smart file filtering and magic number detection"
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -25,7 +25,7 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    /// compress files/directories to .zst
+    /// compress files/directories (supports .zst, .tgz, .txz, .zip, .7z)
     #[command(alias = "c")]
     Compress {
         /// compression level (1-22)
@@ -48,11 +48,15 @@ pub enum Commands {
         #[arg(long)]
         no_default_excludes: bool,
 
+        /// force specific format (zst, tgz, txz, zip, 7z)
+        #[arg(short = 'f', long, value_parser = parse_format)]
+        format: Option<crate::formats::Format>,
+
         /// input file or directory
         input: PathBuf,
     },
 
-    /// extract .zst archives
+    /// extract archives (auto-detects format: .zst, .tgz, .txz, .zip, .7z)
     #[command(alias = "x")]
     Extract {
         /// archive file to extract
@@ -78,17 +82,37 @@ pub enum Commands {
     },
 }
 
+/// Parse format string into Format enum
+fn parse_format(s: &str) -> Result<crate::formats::Format, String> {
+    match s.to_lowercase().as_str() {
+        "zst" | "zstd" => Ok(crate::formats::Format::Zstd),
+        "tgz" | "gz" | "gzip" => Ok(crate::formats::Format::Gzip),
+        "txz" | "xz" => Ok(crate::formats::Format::Xz),
+        "zip" => Ok(crate::formats::Format::Zip),
+        "7z" | "sevenz" => Ok(crate::formats::Format::SevenZ),
+        _ => Err(format!(
+            "unsupported format '{}'. Supported formats: zst, tgz, txz, zip, 7z",
+            s
+        )),
+    }
+}
+
 impl Cli {
-    /// get output path for compression, defaulting to input + .zst
-    pub fn get_output_path(input: &PathBuf, output: Option<PathBuf>) -> PathBuf {
+    /// get output path for compression, defaulting to input + appropriate extension
+    pub fn get_output_path(input: &PathBuf, output: Option<PathBuf>, format: Option<crate::formats::Format>) -> PathBuf {
         output.unwrap_or_else(|| {
             let mut path = input.clone();
+            let extension = format
+                .map(|f| f.extension())
+                .unwrap_or("zst"); // default to zst format
+            
             if let Some(filename) = path.file_name() {
                 let mut new_filename = filename.to_os_string();
-                new_filename.push(".zst");
+                new_filename.push(".");
+                new_filename.push(extension);
                 path.set_file_name(new_filename);
             } else {
-                path.set_extension("zst");
+                path.set_extension(extension);
             }
             path
         })

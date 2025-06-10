@@ -1,7 +1,7 @@
-//! zzz - A simple, fast compression tool for .zst archives
+//! zzz - A simple, fast compression multitool
 //!
-//! This library provides functionality for creating and extracting zstd-compressed
-//! tar archives with smart file filtering and security features.
+//! This library provides functionality for creating and extracting archives in multiple
+//! formats (zst, tgz, txz, zip, 7z) with smart file filtering and security features.
 
 pub mod cli;
 pub mod compress;

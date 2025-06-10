@@ -1,4 +1,4 @@
-//! zzz - simple, fast compression tool for .zst archives
+//! zzz - simple, fast compression multitool
 
 use clap::Parser;
 use std::process;
@@ -28,8 +28,9 @@ fn run(cli: Cli) -> zzz::Result<()> {
             progress,
             exclude,
             no_default_excludes,
+            format,
         } => {
-            let output_path = Cli::get_output_path(&input, output);
+            let output_path = Cli::get_output_path(&input, output, format);
 
             // check if output already exists and prompt user
             if output_path.exists() {
@@ -52,7 +53,7 @@ fn run(cli: Cli) -> zzz::Result<()> {
             let filter = FileFilter::new(!no_default_excludes, &exclude)?;
 
             let stats =
-                compress::compress(&input, &output_path, options, filter, progress, cli.verbose)?;
+                compress::compress(&input, &output_path, options, filter, progress, cli.verbose, format)?;
 
             if !cli.verbose {
                 println!(
