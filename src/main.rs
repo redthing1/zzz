@@ -14,7 +14,7 @@ fn main() {
     let cli = Cli::parse();
 
     if let Err(e) = run(cli) {
-        eprintln!("error: {}", e);
+        eprintln!("error: {e}");
         process::exit(1);
     }
 }
@@ -52,8 +52,15 @@ fn run(cli: Cli) -> zzz::Result<()> {
 
             let filter = FileFilter::new(!no_default_excludes, &exclude)?;
 
-            let stats =
-                compress::compress(&input, &output_path, options, filter, progress, cli.verbose, format)?;
+            let stats = compress::compress(
+                &input,
+                &output_path,
+                options,
+                filter,
+                progress,
+                cli.verbose,
+                format,
+            )?;
 
             if !cli.verbose {
                 println!(

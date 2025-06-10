@@ -3,11 +3,11 @@
 use crate::Result;
 use std::path::Path;
 
-pub mod zstd;
 pub mod gz;
+pub mod sevenz;
 pub mod xz;
 pub mod zip;
-pub mod sevenz;
+pub mod zstd;
 
 #[derive(Debug)]
 pub struct CompressionStats {
@@ -61,19 +61,10 @@ impl Default for CompressionOptions {
 }
 
 /// extraction options for extracting archives
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ExtractionOptions {
     pub overwrite: bool,
     pub strip_components: usize,
-}
-
-impl Default for ExtractionOptions {
-    fn default() -> Self {
-        Self {
-            overwrite: false,
-            strip_components: 0,
-        }
-    }
 }
 
 /// Supported compression formats
@@ -105,12 +96,18 @@ impl Format {
     /// Detect format from file extension
     pub fn from_extension(path: &Path) -> Option<Self> {
         let filename = path.file_name()?.to_str()?.to_lowercase();
-        
+
         if filename.ends_with(".zst") || filename.ends_with(".zstd") {
             Some(Format::Zstd)
-        } else if filename.ends_with(".tgz") || filename.ends_with(".tar.gz") || filename.ends_with(".gz") {
+        } else if filename.ends_with(".tgz")
+            || filename.ends_with(".tar.gz")
+            || filename.ends_with(".gz")
+        {
             Some(Format::Gzip)
-        } else if filename.ends_with(".txz") || filename.ends_with(".tar.xz") || filename.ends_with(".xz") {
+        } else if filename.ends_with(".txz")
+            || filename.ends_with(".tar.xz")
+            || filename.ends_with(".xz")
+        {
             Some(Format::Xz)
         } else if filename.ends_with(".zip") {
             Some(Format::Zip)
@@ -129,12 +126,12 @@ impl Format {
         let mut file = File::open(path)?;
         let mut buffer = [0u8; 16];
         let bytes_read = file.read(&mut buffer)?;
-        
+
         if bytes_read >= 4 {
             // Check magic numbers
             match &buffer[..4] {
                 [0x28, 0xB5, 0x2F, 0xFD] => return Ok(Format::Zstd), // Zstandard
-                [0x1F, 0x8B, _, _] => return Ok(Format::Gzip),        // Gzip
+                [0x1F, 0x8B, _, _] => return Ok(Format::Gzip),       // Gzip
                 [0xFD, 0x37, 0x7A, 0x58] => return Ok(Format::Xz),   // XZ
                 [0x50, 0x4B, 0x03, 0x04] | [0x50, 0x4B, 0x05, 0x06] | [0x50, 0x4B, 0x07, 0x08] => {
                     return Ok(Format::Zip); // ZIP
@@ -164,7 +161,7 @@ impl Format {
         match self {
             Format::Zstd => "zst",
             Format::Gzip => "tgz",
-            Format::Xz => "txz", 
+            Format::Xz => "txz",
             Format::Zip => "zip",
             Format::SevenZ => "7z",
         }
@@ -174,7 +171,7 @@ impl Format {
     pub fn name(&self) -> &'static str {
         match self {
             Format::Zstd => "Zstandard",
-            Format::Gzip => "Gzip", 
+            Format::Gzip => "Gzip",
             Format::Xz => "XZ",
             Format::Zip => "ZIP",
             Format::SevenZ => "7-Zip",

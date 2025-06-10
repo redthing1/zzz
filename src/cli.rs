@@ -1,7 +1,7 @@
 //! command line interface
 
 use clap::{Parser, Subcommand};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
 #[command(
@@ -91,21 +91,22 @@ fn parse_format(s: &str) -> Result<crate::formats::Format, String> {
         "zip" => Ok(crate::formats::Format::Zip),
         "7z" | "sevenz" => Ok(crate::formats::Format::SevenZ),
         _ => Err(format!(
-            "unsupported format '{}'. Supported formats: zst, tgz, txz, zip, 7z",
-            s
+            "unsupported format '{s}'. Supported formats: zst, tgz, txz, zip, 7z"
         )),
     }
 }
 
 impl Cli {
     /// get output path for compression, defaulting to input + appropriate extension
-    pub fn get_output_path(input: &PathBuf, output: Option<PathBuf>, format: Option<crate::formats::Format>) -> PathBuf {
+    pub fn get_output_path(
+        input: &Path,
+        output: Option<PathBuf>,
+        format: Option<crate::formats::Format>,
+    ) -> PathBuf {
         output.unwrap_or_else(|| {
-            let mut path = input.clone();
-            let extension = format
-                .map(|f| f.extension())
-                .unwrap_or("zst"); // default to zst format
-            
+            let mut path = input.to_path_buf();
+            let extension = format.map(|f| f.extension()).unwrap_or("zst"); // default to zst format
+
             if let Some(filename) = path.file_name() {
                 let mut new_filename = filename.to_os_string();
                 new_filename.push(".");

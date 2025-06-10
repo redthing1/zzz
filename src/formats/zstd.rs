@@ -33,9 +33,13 @@ impl ZstdFormat {
             NORMALIZED_FILE_MODE
         } else {
             #[cfg(unix)]
-            { metadata.permissions().mode() }
+            {
+                metadata.permissions().mode()
+            }
             #[cfg(not(unix))]
-            { NORMALIZED_FILE_MODE }
+            {
+                NORMALIZED_FILE_MODE
+            }
         });
 
         Self::apply_header_normalization(&mut header, metadata, options)?;
@@ -55,9 +59,13 @@ impl ZstdFormat {
             NORMALIZED_DIR_MODE
         } else {
             #[cfg(unix)]
-            { metadata.permissions().mode() }
+            {
+                metadata.permissions().mode()
+            }
             #[cfg(not(unix))]
-            { NORMALIZED_DIR_MODE }
+            {
+                NORMALIZED_DIR_MODE
+            }
         });
 
         Self::apply_header_normalization(&mut header, metadata, options)?;
@@ -197,11 +205,7 @@ impl CompressionFormat for ZstdFormat {
         let mut bytes_processed = 0u64;
 
         // determine base path for relative paths in archive
-        let base_path = if input_path.is_file() {
-            input_path.parent().unwrap_or(Path::new("."))
-        } else {
-            input_path.parent().unwrap_or(Path::new("."))
-        };
+        let base_path = input_path.parent().unwrap_or(Path::new("."));
 
         // collect all files to add (with filtering)
         let files_to_add = Self::collect_files_to_add(input_path, filter)?;

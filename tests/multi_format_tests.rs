@@ -9,11 +9,11 @@ use tempfile::TempDir;
 fn create_test_data(dir: &std::path::Path) -> std::io::Result<()> {
     fs::write(dir.join("file1.txt"), "Hello, World!")?;
     fs::write(dir.join("file2.txt"), "Another test file")?;
-    
+
     let subdir = dir.join("subdir");
     fs::create_dir(&subdir)?;
     fs::write(subdir.join("nested.txt"), "Nested file content")?;
-    
+
     Ok(())
 }
 
@@ -229,10 +229,7 @@ fn test_format_detection_by_magic() -> Result<(), Box<dyn std::error::Error>> {
     // Create a zst file without extension
     let zst_file = temp_dir.path().join("test.zst");
     let mut cmd = Command::cargo_bin("zzz")?;
-    cmd.arg("compress")
-        .arg("-o")
-        .arg(&zst_file)
-        .arg(&test_file);
+    cmd.arg("compress").arg("-o").arg(&zst_file).arg(&test_file);
     cmd.assert().success();
 
     // Copy to file without extension
@@ -257,8 +254,8 @@ fn test_compression_levels() -> Result<(), Box<dyn std::error::Error>> {
 
     // Test different compression levels
     for level in [1, 5, 10, 15, 20, 22] {
-        let output_file = temp_dir.path().join(format!("test_level_{}.zst", level));
-        
+        let output_file = temp_dir.path().join(format!("test_level_{level}.zst"));
+
         let mut cmd = Command::cargo_bin("zzz")?;
         cmd.arg("compress")
             .arg("-l")
@@ -284,7 +281,7 @@ fn test_verbose_output() -> Result<(), Box<dyn std::error::Error>> {
     let case_variations = ["ZIP", "Zip", "zIP", "ZsT", "TGZ", "7Z"];
 
     for format in case_variations {
-        let output_file = temp_dir.path().join(format!("test_{}.archive", format));
+        let output_file = temp_dir.path().join(format!("test_{format}.archive"));
 
         let mut cmd = Command::cargo_bin("zzz")?;
         cmd.arg("compress")
@@ -357,10 +354,7 @@ fn test_format_flag_auto_extension() -> Result<(), Box<dyn std::error::Error>> {
 
     // Test format flag with auto-generated extension
     let mut cmd = Command::cargo_bin("zzz")?;
-    cmd.arg("compress")
-        .arg("-f")
-        .arg("7z")
-        .arg(&test_file);
+    cmd.arg("compress").arg("-f").arg("7z").arg(&test_file);
     cmd.assert().success();
 
     // Should create test.txt.7z
@@ -465,16 +459,12 @@ fn test_format_flag_with_compression_levels() -> Result<(), Box<dyn std::error::
     fs::write(&test_file, "test content for compression levels")?;
 
     // Test format flag with different compression levels
-    let test_cases = [
-        ("zst", 1),
-        ("zip", 5),
-        ("7z", 9),
-        ("tgz", 3),
-        ("txz", 6),
-    ];
+    let test_cases = [("zst", 1), ("zip", 5), ("7z", 9), ("tgz", 3), ("txz", 6)];
 
     for (format, level) in test_cases {
-        let output_file = temp_dir.path().join(format!("test_{}_level_{}.archive", format, level));
+        let output_file = temp_dir
+            .path()
+            .join(format!("test_{format}_level_{level}.archive"));
 
         let mut cmd = Command::cargo_bin("zzz")?;
         cmd.arg("compress")
@@ -503,7 +493,7 @@ fn test_format_flag_case_insensitive() -> Result<(), Box<dyn std::error::Error>>
     let case_variations = ["ZIP", "Zip", "zIP", "ZsT", "TGZ", "7Z"];
 
     for format in case_variations {
-        let output_file = temp_dir.path().join(format!("test_{}.archive", format));
+        let output_file = temp_dir.path().join(format!("test_{format}.archive"));
 
         let mut cmd = Command::cargo_bin("zzz")?;
         cmd.arg("compress")

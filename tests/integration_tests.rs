@@ -170,7 +170,7 @@ fn test_custom_compression_levels() -> Result<()> {
 
     // Test different compression levels
     for level in [1, 3, 19, 22] {
-        let archive_path = temp_dir.path().join(format!("test_level_{}.zst", level));
+        let archive_path = temp_dir.path().join(format!("test_level_{level}.zst"));
         let options = CompressionOptions {
             level,
             ..Default::default()

@@ -2,7 +2,9 @@
 
 use crate::{
     filter::FileFilter,
-    formats::{ArchiveEntry, CompressionFormat, CompressionOptions, CompressionStats, ExtractionOptions},
+    formats::{
+        ArchiveEntry, CompressionFormat, CompressionOptions, CompressionStats, ExtractionOptions,
+    },
     progress::Progress,
     utils, Result,
 };
@@ -35,7 +37,7 @@ impl CompressionFormat for ZipFormat {
         let mut zip_writer = ZipWriter::new(buf_writer);
 
         // Map compression level (1-22) to zip level (0-9)
-        let zip_level = std::cmp::min(9, std::cmp::max(0, ((options.level as f32 / 22.0) * 9.0) as i32));
+        let zip_level = (((options.level as f32 / 22.0) * 9.0) as i32).clamp(0, 9);
         let file_options = FileOptions::default()
             .compression_method(CompressionMethod::Deflated)
             .compression_level(Some(zip_level));
@@ -51,7 +53,7 @@ impl CompressionFormat for ZipFormat {
                 .and_then(|n| n.to_str())
                 .ok_or_else(|| anyhow::anyhow!("invalid filename"))?;
             zip_writer.start_file(filename, file_options)?;
-            
+
             let mut file = File::open(input_path)?;
             let mut buffer = Vec::new();
             file.read_to_end(&mut buffer)?;
@@ -79,7 +81,7 @@ impl CompressionFormat for ZipFormat {
 
                 if path.is_file() {
                     zip_writer.start_file(path_str.as_ref(), file_options)?;
-                    
+
                     let mut file = File::open(path)?;
                     let mut buffer = Vec::new();
                     file.read_to_end(&mut buffer)?;
@@ -93,7 +95,7 @@ impl CompressionFormat for ZipFormat {
                     }
                 } else if path.is_dir() {
                     // Add directory entry with trailing slash
-                    let dir_path = format!("{}/", path_str);
+                    let dir_path = format!("{path_str}/");
                     zip_writer.add_directory(&dir_path, file_options)?;
                 }
             }
@@ -117,12 +119,15 @@ impl CompressionFormat for ZipFormat {
             let file_path = file.mangled_name();
 
             // Security: prevent path traversal
-            if file_path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+            if file_path
+                .components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
+            {
                 continue;
             }
 
             let mut target_path = output_dir.to_path_buf();
-            
+
             // Handle strip_components
             let components: Vec<_> = file_path.components().collect();
             if components.len() > options.strip_components {
@@ -166,7 +171,11 @@ impl CompressionFormat for ZipFormat {
             let size = file.size();
             let is_file = !file.is_dir();
 
-            entries.push(ArchiveEntry { path, size, is_file });
+            entries.push(ArchiveEntry {
+                path,
+                size,
+                is_file,
+            });
         }
 
         Ok(entries)

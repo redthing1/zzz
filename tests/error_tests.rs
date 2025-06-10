@@ -74,8 +74,7 @@ fn test_extract_corrupted_archive() -> Result<()> {
             || error_msg.contains("decoder")
             || error_msg.contains("invalid")
             || error_msg.contains("frame descriptor"),
-        "Error message: {}",
-        error_msg
+        "Error message: {error_msg}"
     );
 
     Ok(())
@@ -233,10 +232,9 @@ fn test_directory_traversal_protection() -> Result<()> {
 
         if has_parent_dir {
             // Our extraction code should reject such paths
-            assert!(
-                true,
-                "Path {} contains dangerous parent directory references",
-                dangerous_path
+            // Our extraction code should reject such paths
+            println!(
+                "Path {dangerous_path} contains dangerous parent directory references"
             );
         }
     }
@@ -322,12 +320,12 @@ fn test_invalid_glob_pattern_in_filter() {
     ];
 
     for pattern in invalid_patterns {
-        let result = FileFilter::new(true, &[pattern.clone()]);
+        let result = FileFilter::new(true, std::slice::from_ref(&pattern));
         // Some patterns may be accepted by the glob crate, so we just ensure
         // the function doesn't panic and handles them gracefully
         match result {
-            Ok(_) => println!("Pattern '{}' was accepted", pattern),
-            Err(_) => println!("Pattern '{}' was rejected", pattern),
+            Ok(_) => println!("Pattern '{pattern}' was accepted"),
+            Err(_) => println!("Pattern '{pattern}' was rejected"),
         }
     }
 }

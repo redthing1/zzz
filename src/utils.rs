@@ -61,7 +61,7 @@ pub fn format_bytes(bytes: u64) -> String {
 pub fn prompt_yes_no(message: &str) -> bool {
     use std::io::{self, Write};
 
-    print!("{} [y/N]: ", message);
+    print!("{message} [y/N]: ");
     io::stdout().flush().unwrap();
 
     let mut input = String::new();

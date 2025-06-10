@@ -2,15 +2,14 @@
 
 use crate::{
     filter::FileFilter,
-    formats::{ArchiveEntry, CompressionFormat, CompressionOptions, CompressionStats, ExtractionOptions},
+    formats::{
+        ArchiveEntry, CompressionFormat, CompressionOptions, CompressionStats, ExtractionOptions,
+    },
     progress::Progress,
     utils, Result,
 };
 use sevenz_rust::{Password, SevenZReader, SevenZWriter};
-use std::{
-    fs::File,
-    path::Path,
-};
+use std::{fs::File, path::Path};
 use walkdir::WalkDir;
 
 pub struct SevenZFormat;
@@ -103,12 +102,15 @@ impl CompressionFormat for SevenZFormat {
             let file_path = std::path::Path::new(&entry.name);
 
             // Security: prevent path traversal
-            if file_path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+            if file_path
+                .components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
+            {
                 return Ok(true);
             }
 
             let mut target_path = output_dir.to_path_buf();
-            
+
             // Handle strip_components
             let components: Vec<_> = file_path.components().collect();
             if components.len() > options.strip_components {
@@ -152,7 +154,11 @@ impl CompressionFormat for SevenZFormat {
             let size = file.size;
             let is_file = !file.is_directory();
 
-            entries.push(ArchiveEntry { path, size, is_file });
+            entries.push(ArchiveEntry {
+                path,
+                size,
+                is_file,
+            });
         }
 
         Ok(entries)

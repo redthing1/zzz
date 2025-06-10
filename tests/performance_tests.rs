@@ -21,7 +21,7 @@ fn create_test_directory(dir: &std::path::Path, num_files: usize, file_size: usi
     fs::create_dir_all(dir)?;
 
     for i in 0..num_files {
-        let file_path = dir.join(format!("file_{:04}.txt", i));
+        let file_path = dir.join(format!("file_{i:04}.txt"));
         create_test_file(&file_path, file_size)?;
     }
 
@@ -44,14 +44,13 @@ fn test_compression_performance_small_file() -> Result<()> {
     let stats = ZstdFormat::compress(&source_file, &archive_path, &options, &filter, None)?;
     let duration = start.elapsed();
 
-    println!("Small file (1KB) compression: {:?}", duration);
+    println!("Small file (1KB) compression: {duration:?}");
     println!("Compression ratio: {:.2}", stats.compression_ratio);
 
     // Basic performance expectations
     assert!(
         duration.as_millis() < 1000,
-        "Small file compression took too long: {:?}",
-        duration
+        "Small file compression took too long: {duration:?}"
     );
     assert!(stats.compression_ratio < 1.0, "File should have compressed");
 
@@ -74,7 +73,7 @@ fn test_compression_performance_medium_file() -> Result<()> {
     let stats = ZstdFormat::compress(&source_file, &archive_path, &options, &filter, None)?;
     let duration = start.elapsed();
 
-    println!("Medium file (1MB) compression: {:?}", duration);
+    println!("Medium file (1MB) compression: {duration:?}");
     println!("Compression ratio: {:.2}", stats.compression_ratio);
     println!(
         "Throughput: {:.2} MB/s",
@@ -84,8 +83,7 @@ fn test_compression_performance_medium_file() -> Result<()> {
     // Should complete within reasonable time
     assert!(
         duration.as_secs() < 10,
-        "Medium file compression took too long: {:?}",
-        duration
+        "Medium file compression took too long: {duration:?}"
     );
 
     Ok(())
@@ -106,7 +104,7 @@ fn test_compression_levels_performance() -> Result<()> {
     println!("Compression level performance comparison:");
 
     for level in levels {
-        let archive_path = temp_dir.path().join(format!("level_{}.zst", level));
+        let archive_path = temp_dir.path().join(format!("level_{level}.zst"));
         let options = CompressionOptions {
             level,
             ..Default::default()
@@ -124,9 +122,7 @@ fn test_compression_levels_performance() -> Result<()> {
         // All levels should complete within reasonable time
         assert!(
             duration.as_secs() < 5,
-            "Level {} took too long: {:?}",
-            level,
-            duration
+            "Level {level} took too long: {duration:?}"
         );
 
         // Higher levels should generally produce better compression
@@ -153,15 +149,15 @@ fn test_many_small_files_performance() -> Result<()> {
     let stats = ZstdFormat::compress(&source_dir, &archive_path, &options, &filter, None)?;
     let duration = start.elapsed();
 
-    println!("Many files (100 × 1KB) compression: {:?}", duration);
-    println!("Total input size: {} KB", stats.input_size / 1024);
+    println!("Many files (100 × 1KB) compression: {duration:?}");
+    let size_kb = stats.input_size / 1024;
+    println!("Total input size: {size_kb} KB");
     println!("Files per second: {:.1}", 100.0 / duration.as_secs_f64());
 
     // Should handle many small files efficiently
     assert!(
         duration.as_secs() < 5,
-        "Many files compression took too long: {:?}",
-        duration
+        "Many files compression took too long: {duration:?}"
     );
     assert_eq!(stats.input_size, 100 * 1024); // Verify all files were processed
 
@@ -191,14 +187,13 @@ fn test_extraction_performance() -> Result<()> {
     ZstdFormat::extract(&archive_path, &extract_dir, &extract_options)?;
     let duration = start.elapsed();
 
-    println!("Extraction (50 × 2KB files): {:?}", duration);
+    println!("Extraction (50 × 2KB files): {duration:?}");
     println!("Files per second: {:.1}", 50.0 / duration.as_secs_f64());
 
     // Verify extraction completed and was reasonably fast
     assert!(
         duration.as_secs() < 3,
-        "Extraction took too long: {:?}",
-        duration
+        "Extraction took too long: {duration:?}"
     );
     assert!(extract_dir.join("extract_test").exists());
 
@@ -221,15 +216,15 @@ fn test_filtering_performance() -> Result<()> {
     // Create mix of files to keep and exclude
     for i in 0..200 {
         let filename = if i % 3 == 0 {
-            format!("keep_{}.txt", i)
+            format!("keep_{i}.txt")
         } else if i % 3 == 1 {
-            format!("exclude_{}.log", i) // Will be excluded by custom pattern
+            format!("exclude_{i}.log") // Will be excluded by custom pattern
         } else {
-            format!("exclude_{}.tmp", i) // Will be excluded by default pattern
+            format!("exclude_{i}.tmp") // Will be excluded by default pattern
         };
 
         let file_path = source_dir.join(filename);
-        fs::write(file_path, format!("Content {}", i))?;
+        fs::write(file_path, format!("Content {i}"))?;
     }
 
     // Add some garbage files that should be filtered by defaults
@@ -245,8 +240,7 @@ fn test_filtering_performance() -> Result<()> {
     let duration = start.elapsed();
 
     println!(
-        "Filtering performance (200 files with mixed patterns): {:?}",
-        duration
+        "Filtering performance (200 files with mixed patterns): {duration:?}"
     );
     println!(
         "Compression completed with {} input bytes",
@@ -256,8 +250,7 @@ fn test_filtering_performance() -> Result<()> {
     // Should efficiently filter and compress
     assert!(
         duration.as_secs() < 5,
-        "Filtering took too long: {:?}",
-        duration
+        "Filtering took too long: {duration:?}"
     );
 
     // Verify that filtering worked by checking input size
@@ -301,7 +294,7 @@ fn test_listing_performance() -> Result<()> {
     let entries = ZstdFormat::list(&archive_path)?;
     let duration = start.elapsed();
 
-    println!("Listing performance (500 files): {:?}", duration);
+    println!("Listing performance (500 files): {duration:?}");
     println!(
         "Entries per second: {:.1}",
         entries.len() as f64 / duration.as_secs_f64()
@@ -310,8 +303,7 @@ fn test_listing_performance() -> Result<()> {
     // Should list files quickly
     assert!(
         duration.as_millis() < 500,
-        "Listing took too long: {:?}",
-        duration
+        "Listing took too long: {duration:?}"
     );
     assert!(entries.len() >= 500, "Not all entries were listed"); // May include directory entries
 
@@ -329,11 +321,11 @@ fn test_memory_efficiency_large_directory() -> Result<()> {
 
     // Create nested directories with files
     for i in 0..20 {
-        let subdir = source_dir.join(format!("subdir_{}", i));
+        let subdir = source_dir.join(format!("subdir_{i}"));
         fs::create_dir(&subdir)?;
 
         for j in 0..25 {
-            let file_path = subdir.join(format!("file_{}_{}.txt", i, j));
+            let file_path = subdir.join(format!("file_{i}_{j}.txt"));
             create_test_file(&file_path, 512)?; // 512 bytes each
         }
     }
@@ -347,8 +339,7 @@ fn test_memory_efficiency_large_directory() -> Result<()> {
     let duration = start.elapsed();
 
     println!(
-        "Large directory (20 dirs × 25 files) compression: {:?}",
-        duration
+        "Large directory (20 dirs × 25 files) compression: {duration:?}"
     );
     println!("Total files processed: 500");
     println!(
@@ -359,8 +350,7 @@ fn test_memory_efficiency_large_directory() -> Result<()> {
     // Should handle large directory structures efficiently
     assert!(
         duration.as_secs() < 10,
-        "Large directory compression took too long: {:?}",
-        duration
+        "Large directory compression took too long: {duration:?}"
     );
     assert_eq!(stats.input_size, 20 * 25 * 512); // Verify all files processed
 

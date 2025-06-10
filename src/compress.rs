@@ -36,17 +36,27 @@ pub fn compress(
         println!("using {} format", format.name());
     }
 
-    // calculate total size for progress tracking  
+    // calculate total size for progress tracking
     let total_size = crate::utils::calculate_directory_size(input_path, &filter)?;
     let progress = Progress::new(show_progress, total_size);
 
     // dispatch to appropriate format implementation
     let stats = match format {
-        Format::Zstd => ZstdFormat::compress(input_path, output_path, &options, &filter, Some(&progress))?,
-        Format::Gzip => GzipFormat::compress(input_path, output_path, &options, &filter, Some(&progress))?,
-        Format::Xz => XzFormat::compress(input_path, output_path, &options, &filter, Some(&progress))?,
-        Format::Zip => ZipFormat::compress(input_path, output_path, &options, &filter, Some(&progress))?,
-        Format::SevenZ => SevenZFormat::compress(input_path, output_path, &options, &filter, Some(&progress))?,
+        Format::Zstd => {
+            ZstdFormat::compress(input_path, output_path, &options, &filter, Some(&progress))?
+        }
+        Format::Gzip => {
+            GzipFormat::compress(input_path, output_path, &options, &filter, Some(&progress))?
+        }
+        Format::Xz => {
+            XzFormat::compress(input_path, output_path, &options, &filter, Some(&progress))?
+        }
+        Format::Zip => {
+            ZipFormat::compress(input_path, output_path, &options, &filter, Some(&progress))?
+        }
+        Format::SevenZ => {
+            SevenZFormat::compress(input_path, output_path, &options, &filter, Some(&progress))?
+        }
     };
 
     progress.finish();

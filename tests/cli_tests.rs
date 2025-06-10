@@ -38,7 +38,7 @@ fn test_cli_version() {
 #[test]
 fn test_compress_help() {
     zzz_cmd()
-        .args(&["compress", "--help"])
+        .args(["compress", "--help"])
         .assert()
         .success()
         .stdout(predicate::str::contains(
@@ -61,7 +61,7 @@ fn test_compress_single_file() -> Result<()> {
 
     // Compress via CLI
     zzz_cmd()
-        .args(&["compress", "--output"])
+        .args(["compress", "--output"])
         .arg(&output_file)
         .arg(&source_file)
         .assert()
@@ -86,7 +86,7 @@ fn test_compress_with_short_alias() -> Result<()> {
 
     // Use 'c' alias for compress
     zzz_cmd()
-        .args(&["c", "-o"])
+        .args(["c", "-o"])
         .arg(&output_file)
         .arg(&source_file)
         .assert()
@@ -114,7 +114,7 @@ fn test_compress_directory() -> Result<()> {
 
     // Compress directory
     zzz_cmd()
-        .args(&["compress", "-o"])
+        .args(["compress", "-o"])
         .arg(&output_file)
         .arg(&source_dir)
         .assert()
@@ -136,7 +136,7 @@ fn test_compress_with_custom_level() -> Result<()> {
 
     // Compress with level 1 (fast)
     zzz_cmd()
-        .args(&["compress", "--level", "1", "-o"])
+        .args(["compress", "--level", "1", "-o"])
         .arg(&output_file)
         .arg(&source_file)
         .assert()
@@ -161,7 +161,7 @@ fn test_compress_with_custom_excludes() -> Result<()> {
 
     // Compress with custom excludes
     zzz_cmd()
-        .args(&[
+        .args([
             "compress",
             "--exclude",
             "*.log",
@@ -189,7 +189,7 @@ fn test_extract_archive() -> Result<()> {
     // Create and compress file
     fs::write(&source_file, "Extract test content")?;
     zzz_cmd()
-        .args(&["compress", "-o"])
+        .args(["compress", "-o"])
         .arg(&archive_file)
         .arg(&source_file)
         .assert()
@@ -200,7 +200,7 @@ fn test_extract_archive() -> Result<()> {
 
     // Extract via CLI
     zzz_cmd()
-        .args(&["extract", "-C"])
+        .args(["extract", "-C"])
         .arg(&extract_dir)
         .arg(&archive_file)
         .assert()
@@ -224,7 +224,7 @@ fn test_extract_with_alias() -> Result<()> {
 
     fs::write(&source_file, "Test content")?;
     zzz_cmd()
-        .args(&["c", "-o"])
+        .args(["c", "-o"])
         .arg(&archive_file)
         .arg(&source_file)
         .assert()
@@ -234,7 +234,7 @@ fn test_extract_with_alias() -> Result<()> {
 
     // Use 'x' alias for extract
     zzz_cmd()
-        .args(&["x", "-C"])
+        .args(["x", "-C"])
         .arg(&extract_dir)
         .arg(&archive_file)
         .assert()
@@ -262,7 +262,7 @@ fn test_list_archive() -> Result<()> {
 
     // Compress
     zzz_cmd()
-        .args(&["compress", "-o"])
+        .args(["compress", "-o"])
         .arg(&archive_file)
         .arg(&source_dir)
         .assert()
@@ -270,7 +270,7 @@ fn test_list_archive() -> Result<()> {
 
     // List contents
     zzz_cmd()
-        .args(&["list"])
+        .args(["list"])
         .arg(&archive_file)
         .assert()
         .success()
@@ -290,7 +290,7 @@ fn test_list_with_alias_and_verbose() -> Result<()> {
     fs::write(&source_file, "Test content for verbose listing")?;
 
     zzz_cmd()
-        .args(&["c", "-o"])
+        .args(["c", "-o"])
         .arg(&archive_file)
         .arg(&source_file)
         .assert()
@@ -298,7 +298,7 @@ fn test_list_with_alias_and_verbose() -> Result<()> {
 
     // Use 'l' alias with verbose flag
     zzz_cmd()
-        .args(&["l", "--verbose"])
+        .args(["l", "--verbose"])
         .arg(&archive_file)
         .assert()
         .success()
@@ -318,7 +318,7 @@ fn test_compress_auto_output_name() -> Result<()> {
 
     // Compress without specifying output (should auto-generate name)
     zzz_cmd()
-        .args(&["compress"])
+        .args(["compress"])
         .arg(&source_file)
         .current_dir(&temp_dir)
         .assert()
@@ -332,7 +332,7 @@ fn test_compress_auto_output_name() -> Result<()> {
 #[test]
 fn test_error_missing_input_file() {
     zzz_cmd()
-        .args(&["compress", "/nonexistent/file.txt"])
+        .args(["compress", "/nonexistent/file.txt"])
         .assert()
         .failure()
         .stderr(predicate::str::contains("error"));
@@ -345,7 +345,7 @@ fn test_error_invalid_compression_level() {
     fs::write(&source_file, "test").unwrap();
 
     zzz_cmd()
-        .args(&["compress", "--level", "25"]) // Invalid level (max is 22)
+        .args(["compress", "--level", "25"]) // Invalid level (max is 22)
         .arg(&source_file)
         .assert()
         .failure();
@@ -361,7 +361,7 @@ fn test_verbose_output() -> Result<()> {
 
     // Test verbose compression
     zzz_cmd()
-        .args(&["--verbose", "compress", "-o"])
+        .args(["--verbose", "compress", "-o"])
         .arg(&output_file)
         .arg(&source_file)
         .assert()

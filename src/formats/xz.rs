@@ -2,7 +2,9 @@
 
 use crate::{
     filter::FileFilter,
-    formats::{ArchiveEntry, CompressionFormat, CompressionOptions, CompressionStats, ExtractionOptions},
+    formats::{
+        ArchiveEntry, CompressionFormat, CompressionOptions, CompressionStats, ExtractionOptions,
+    },
     progress::Progress,
     utils, Result,
 };
@@ -36,9 +38,9 @@ impl CompressionFormat for XzFormat {
 
         let output_file = File::create(output_path)?;
         let buf_writer = BufWriter::new(output_file);
-        
+
         // Map compression level (1-22) to xz level (0-9)
-        let xz_level = std::cmp::min(9, std::cmp::max(0, ((options.level as f32 / 22.0) * 9.0) as u32));
+        let xz_level = (((options.level as f32 / 22.0) * 9.0) as u32).clamp(0, 9);
         let encoder = XzEncoder::new(buf_writer, xz_level);
         let mut tar_builder = Builder::new(encoder);
 
@@ -86,17 +88,26 @@ impl CompressionFormat for XzFormat {
                     let file = File::open(path)?;
                     let metadata = entry.metadata()?;
                     let mut header = tar::Header::new_gnu();
-                    
+
                     header.set_size(metadata.len());
-                    header.set_mode(if options.normalize_permissions { 
-                        0o644 
-                    } else { 
+                    header.set_mode(if options.normalize_permissions {
+                        0o644
+                    } else {
                         #[cfg(unix)]
-                        { metadata.permissions().mode() }
+                        {
+                            metadata.permissions().mode()
+                        }
                         #[cfg(not(unix))]
-                        { 0o644 }
+                        {
+                            0o644
+                        }
                     });
-                    header.set_mtime(metadata.modified()?.duration_since(std::time::UNIX_EPOCH)?.as_secs());
+                    header.set_mtime(
+                        metadata
+                            .modified()?
+                            .duration_since(std::time::UNIX_EPOCH)?
+                            .as_secs(),
+                    );
                     header.set_cksum();
 
                     tar_builder.append_data(&mut header, relative_path, file)?;
@@ -108,18 +119,27 @@ impl CompressionFormat for XzFormat {
                 } else if path.is_dir() {
                     let metadata = entry.metadata()?;
                     let mut header = tar::Header::new_gnu();
-                    
+
                     header.set_size(0);
-                    header.set_mode(if options.normalize_permissions { 
-                        0o755 
-                    } else { 
+                    header.set_mode(if options.normalize_permissions {
+                        0o755
+                    } else {
                         #[cfg(unix)]
-                        { metadata.permissions().mode() }
+                        {
+                            metadata.permissions().mode()
+                        }
                         #[cfg(not(unix))]
-                        { 0o755 }
+                        {
+                            0o755
+                        }
                     });
                     header.set_entry_type(EntryType::Directory);
-                    header.set_mtime(metadata.modified()?.duration_since(std::time::UNIX_EPOCH)?.as_secs());
+                    header.set_mtime(
+                        metadata
+                            .modified()?
+                            .duration_since(std::time::UNIX_EPOCH)?
+                            .as_secs(),
+                    );
                     header.set_cksum();
 
                     tar_builder.append_data(&mut header, relative_path, std::io::empty())?;
@@ -141,18 +161,21 @@ impl CompressionFormat for XzFormat {
         let mut archive = Archive::new(decoder);
 
         std::fs::create_dir_all(output_dir)?;
-        
+
         for entry in archive.entries()? {
             let mut entry = entry?;
             let path = entry.path()?;
-            
+
             // Security: prevent path traversal
-            if path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+            if path
+                .components()
+                .any(|c| matches!(c, std::path::Component::ParentDir))
+            {
                 continue;
             }
 
             let mut target_path = output_dir.to_path_buf();
-            
+
             // Handle strip_components
             let components: Vec<_> = path.components().collect();
             if components.len() > options.strip_components {
@@ -185,14 +208,18 @@ impl CompressionFormat for XzFormat {
         let mut archive = Archive::new(decoder);
 
         let mut entries = Vec::new();
-        
+
         for entry in archive.entries()? {
             let entry = entry?;
             let path = entry.path()?.to_string_lossy().to_string();
             let size = entry.header().size()?;
             let is_file = entry.header().entry_type().is_file();
 
-            entries.push(ArchiveEntry { path, size, is_file });
+            entries.push(ArchiveEntry {
+                path,
+                size,
+                is_file,
+            });
         }
 
         Ok(entries)
