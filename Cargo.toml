@@ -1,0 +1,22 @@
+[package]
+name = "zzz"
+version = "0.1.0"
+edition = "2021"
+description = "zzz: compression multitool"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/user/zzz"
+authors = ["Your Name <email@example.com>"]
+
+[dependencies]
+clap = { version = "4.4", features = ["derive"] }
+zstd = "0.13"
+tar = "0.4"
+walkdir = "2.4"
+indicatif = "0.17"
+anyhow = "1.0"
+glob = "0.3"
+num_cpus = "1.16"
+
+[dev-dependencies]
+tempfile = "3.8"
+assert_cmd = "2.0"
