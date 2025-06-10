@@ -14,6 +14,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use tar::Builder;
 use walkdir::WalkDir;
+use zstd::stream::raw::CParameter;
 
 // File permission constants for security normalization
 const NORMALIZED_FILE_MODE: u32 = 0o644;
@@ -196,10 +197,22 @@ impl CompressionFormat for ZstdFormat {
         let output_file = File::create(output_path)
             .with_context(|| format!("failed to create output file: {}", output_path.display()))?;
 
-        // set up zstd encoder with compression level
-        let encoder = zstd::Encoder::new(output_file, options.level).with_context(|| {
+        // set up zstd encoder with compression level and threading
+        let mut encoder = zstd::Encoder::new(output_file, options.level).with_context(|| {
             format!("failed to create zstd encoder with level {}", options.level)
         })?;
+
+        // configure threading for parallel compression (if supported)
+        let thread_count = if options.threads == 0 {
+            num_cpus::get() as u32
+        } else {
+            options.threads
+        };
+
+        // Try to enable multithreading, but don't fail if unsupported
+        if thread_count > 1 {
+            let _ = encoder.set_parameter(CParameter::NbWorkers(thread_count));
+        }
 
         // track bytes processed for progress
         let mut bytes_processed = 0u64;
