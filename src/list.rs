@@ -1,18 +1,18 @@
 //! archive listing functionality
 
-use std::path::Path;
-use crate::formats::CompressionFormat;
 use crate::formats::zstd::ZstdFormat;
+use crate::formats::CompressionFormat;
 use crate::Result;
+use std::path::Path;
 
 /// list contents of a .zst archive
 pub fn list(archive_path: &Path, verbose: bool) -> Result<()> {
     if verbose {
         println!("listing contents of {}", archive_path.display());
     }
-    
+
     let entries = ZstdFormat::list(archive_path)?;
-    
+
     for entry in entries {
         if verbose {
             // detailed listing with sizes
@@ -27,6 +27,6 @@ pub fn list(archive_path: &Path, verbose: bool) -> Result<()> {
             println!("{}", entry.path);
         }
     }
-    
+
     Ok(())
 }

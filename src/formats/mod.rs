@@ -1,7 +1,7 @@
 //! compression format abstraction
 
-use std::path::Path;
 use crate::Result;
+use std::path::Path;
 
 pub mod zstd;
 
@@ -19,7 +19,11 @@ impl CompressionStats {
         } else {
             0.0
         };
-        Self { input_size, output_size, compression_ratio }
+        Self {
+            input_size,
+            output_size,
+            compression_ratio,
+        }
     }
 }
 
@@ -33,11 +37,11 @@ pub struct ArchiveEntry {
 /// compression options for creating archives
 #[derive(Debug, Clone)]
 pub struct CompressionOptions {
-    pub level: i32,                    // 1-22, default 19
-    pub threads: u32,                  // 0 = auto-detect CPU cores
-    pub normalize_permissions: bool,    // security: normalize ownership
-    pub strip_xattrs: bool,            // security: remove extended attributes  
-    pub deterministic: bool,           // sort files for reproducible archives
+    pub level: i32,                  // 1-22, default 19
+    pub threads: u32,                // 0 = auto-detect CPU cores
+    pub normalize_permissions: bool, // security: normalize ownership
+    pub strip_xattrs: bool,          // security: remove extended attributes
+    pub deterministic: bool,         // sort files for reproducible archives
 }
 
 impl Default for CompressionOptions {
@@ -75,16 +79,12 @@ pub trait CompressionFormat {
         output_path: &Path,
         options: &CompressionOptions,
         filter: &crate::filter::FileFilter,
-        progress: Option<&crate::progress::Progress>
+        progress: Option<&crate::progress::Progress>,
     ) -> Result<CompressionStats>;
-    
-    fn extract(
-        archive_path: &Path,
-        output_dir: &Path,
-        options: &ExtractionOptions
-    ) -> Result<()>;
-    
+
+    fn extract(archive_path: &Path, output_dir: &Path, options: &ExtractionOptions) -> Result<()>;
+
     fn list(archive_path: &Path) -> Result<Vec<ArchiveEntry>>;
-    
+
     fn extension() -> &'static str;
 }

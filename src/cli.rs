@@ -1,7 +1,7 @@
 //! command line interface
 
-use std::path::PathBuf;
 use clap::{Parser, Subcommand};
+use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(
@@ -13,11 +13,11 @@ use clap::{Parser, Subcommand};
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
-    
+
     /// verbose output
     #[arg(short, long, global = true)]
     pub verbose: bool,
-    
+
     /// number of threads (0 = auto-detect)
     #[arg(long, global = true, default_value = "0")]
     pub threads: u32,
@@ -29,47 +29,47 @@ pub enum Commands {
     #[command(alias = "c")]
     Compress {
         /// compression level (1-22)
-        #[arg(short, long, default_value = "19")]
+        #[arg(short, long, default_value = "19", value_parser = clap::value_parser!(i32).range(1..=22))]
         level: i32,
-        
+
         /// output file path
         #[arg(short, long)]
         output: Option<PathBuf>,
-        
+
         /// show progress bar
         #[arg(short = 'P', long)]
         progress: bool,
-        
+
         /// exclude files matching pattern (repeatable)
         #[arg(long)]
         exclude: Vec<String>,
-        
+
         /// disable built-in garbage file filtering
         #[arg(long)]
         no_default_excludes: bool,
-        
+
         /// input file or directory
         input: PathBuf,
     },
-    
+
     /// extract .zst archives
     #[command(alias = "x")]
     Extract {
         /// archive file to extract
         archive: PathBuf,
-        
+
         /// destination directory
         destination: Option<PathBuf>,
-        
+
         /// extract to specific directory
         #[arg(short = 'C', long)]
         directory: Option<PathBuf>,
-        
+
         /// overwrite existing files
         #[arg(long)]
         overwrite: bool,
     },
-    
+
     /// list archive contents
     #[command(alias = "l")]
     List {
@@ -93,7 +93,7 @@ impl Cli {
             path
         })
     }
-    
+
     /// get extraction directory, defaulting to current directory
     pub fn get_extract_dir(destination: Option<PathBuf>, directory: Option<PathBuf>) -> PathBuf {
         directory

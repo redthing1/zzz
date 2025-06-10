@@ -5,13 +5,13 @@
 
 pub mod cli;
 pub mod compress;
+pub mod error;
 pub mod extract;
-pub mod list;
-pub mod formats;
 pub mod filter;
+pub mod formats;
+pub mod list;
 pub mod progress;
 pub mod utils;
-pub mod error;
 
 // re-export main types for convenience
 pub use error::Result;
