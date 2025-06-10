@@ -239,9 +239,7 @@ fn test_filtering_performance() -> Result<()> {
     let stats = ZstdFormat::compress(&source_dir, &archive_path, &options, &filter, None)?;
     let duration = start.elapsed();
 
-    println!(
-        "Filtering performance (200 files with mixed patterns): {duration:?}"
-    );
+    println!("Filtering performance (200 files with mixed patterns): {duration:?}");
     println!(
         "Compression completed with {} input bytes",
         stats.input_size
@@ -338,9 +336,7 @@ fn test_memory_efficiency_large_directory() -> Result<()> {
     let stats = ZstdFormat::compress(&source_dir, &archive_path, &options, &filter, None)?;
     let duration = start.elapsed();
 
-    println!(
-        "Large directory (20 dirs × 25 files) compression: {duration:?}"
-    );
+    println!("Large directory (20 dirs × 25 files) compression: {duration:?}");
     println!("Total files processed: 500");
     println!(
         "Throughput: {:.2} files/sec",

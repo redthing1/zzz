@@ -233,9 +233,7 @@ fn test_directory_traversal_protection() -> Result<()> {
         if has_parent_dir {
             // Our extraction code should reject such paths
             // Our extraction code should reject such paths
-            println!(
-                "Path {dangerous_path} contains dangerous parent directory references"
-            );
+            println!("Path {dangerous_path} contains dangerous parent directory references");
         }
     }
 
