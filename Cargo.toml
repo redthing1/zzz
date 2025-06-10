@@ -3,9 +3,9 @@ name = "zzz"
 version = "0.1.0"
 edition = "2021"
 description = "zzz: compression multitool"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/user/zzz"
-authors = ["Your Name <email@example.com>"]
+license = "MIT"
+repository = "https://github.com/redthing1/zzz"
+authors = ["redthing1 <redthing1@alt.icu>"]
 
 [dependencies]
 clap = { version = "4.4", features = ["derive"] }
