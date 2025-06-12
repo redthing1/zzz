@@ -20,8 +20,8 @@ once_cell = "1.19.0"
 # compression formats
 flate2 = "1.0"  # gz
 xz2 = "0.1"     # xz
-zip = "0.6"     # zip
-sevenz-rust = "0.6"  # 7z
+zip = { version = "0.6", features = ["deflate", "time"] }     # zip
+sevenz-rust = { version = "0.6", features = ["aes256"] }  # 7z
 # magic number detection
 tree_magic_mini = "3.1"
 

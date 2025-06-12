@@ -47,6 +47,7 @@ pub struct CompressionOptions {
     pub normalize_permissions: bool, // security: normalize ownership
     pub strip_xattrs: bool,          // security: remove extended attributes
     pub deterministic: bool,         // sort files for reproducible archives
+    pub password: Option<String>,
 }
 
 impl Default for CompressionOptions {
@@ -57,6 +58,7 @@ impl Default for CompressionOptions {
             normalize_permissions: true,
             strip_xattrs: true,
             deterministic: true,
+            password: None,
         }
     }
 }
@@ -66,6 +68,7 @@ impl Default for CompressionOptions {
 pub struct ExtractionOptions {
     pub overwrite: bool,
     pub strip_components: usize,
+    pub password: Option<String>,
 }
 
 /// Supported compression formats
@@ -209,4 +212,6 @@ pub trait CompressionFormat {
     fn list(archive_path: &Path) -> Result<Vec<ArchiveEntry>>;
 
     fn extension() -> &'static str;
+
+    fn test_integrity(archive_path: &Path) -> Result<()>;
 }

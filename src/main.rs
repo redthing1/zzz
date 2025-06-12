@@ -6,7 +6,7 @@ use zzz::{
     cli::{Cli, Commands},
     compress, extract,
     filter::FileFilter,
-    formats::{CompressionOptions, ExtractionOptions},
+    formats::{CompressionFormat, CompressionOptions, ExtractionOptions},
     list,
 };
 
@@ -29,6 +29,7 @@ fn run(cli: Cli) -> zzz::Result<()> {
             exclude,
             no_default_excludes,
             format,
+            password,
         } => {
             let output_path = Cli::get_output_path(&input, output, format);
 
@@ -47,6 +48,7 @@ fn run(cli: Cli) -> zzz::Result<()> {
             let options = CompressionOptions {
                 level,
                 threads: cli.threads,
+                password,
                 ..Default::default()
             };
 
@@ -78,11 +80,13 @@ fn run(cli: Cli) -> zzz::Result<()> {
             destination,
             directory,
             overwrite,
+            password,
         } => {
             let extract_dir = Cli::get_extract_dir(destination, directory);
 
             let options = ExtractionOptions {
                 overwrite,
+                password,
                 ..Default::default()
             };
 
@@ -91,6 +95,31 @@ fn run(cli: Cli) -> zzz::Result<()> {
 
         Commands::List { archive } => {
             list::list(&archive, cli.verbose)?;
+        }
+
+        Commands::Test { archive } => {
+            // Detect format and test integrity
+            let format = zzz::formats::Format::detect(&archive)?;
+            
+            match format {
+                zzz::formats::Format::Zip => {
+                    zzz::formats::zip::ZipFormat::test_integrity(&archive)?
+                }
+                zzz::formats::Format::SevenZ => {
+                    zzz::formats::sevenz::SevenZFormat::test_integrity(&archive)?
+                }
+                zzz::formats::Format::Gzip => {
+                    zzz::formats::gz::GzipFormat::test_integrity(&archive)?
+                }
+                zzz::formats::Format::Xz => {
+                    zzz::formats::xz::XzFormat::test_integrity(&archive)?
+                }
+                zzz::formats::Format::Zstd => {
+                    zzz::formats::zstd::ZstdFormat::test_integrity(&archive)?
+                }
+            }
+            
+            println!("{} integrity: OK", archive.display());
         }
     }
 

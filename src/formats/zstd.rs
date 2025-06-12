@@ -359,4 +359,27 @@ impl CompressionFormat for ZstdFormat {
     fn extension() -> &'static str {
         "zst"
     }
+
+    fn test_integrity(archive_path: &Path) -> Result<()> {
+        // For Zstd, .tar.zst is common. Otherwise, just try to decompress.
+        use std::fs::File;
+        use std::io::Read;
+        use zstd::stream::read::Decoder as ZstdDecoder;
+        use tar::Archive;
+
+        let file = File::open(archive_path)?;
+        if archive_path.extension().map_or(false, |ext| ext == "tzst" || ext == "tar.zst") ||
+           archive_path.file_name().map_or(false, |name| name.to_string_lossy().ends_with(".tar.zst")) {
+            let zstd_decoder = ZstdDecoder::new(file)?;
+            let mut archive = Archive::new(zstd_decoder);
+            for entry in archive.entries()? {
+                let _entry = entry?;
+            }
+        } else { // Single .zst file
+            let mut zstd_decoder = ZstdDecoder::new(file)?;
+            let mut buffer = Vec::new();
+            zstd_decoder.read_to_end(&mut buffer)?;
+        }
+        Ok(())
+    }
 }

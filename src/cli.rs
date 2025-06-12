@@ -54,6 +54,10 @@ pub enum Commands {
 
         /// input file or directory
         input: PathBuf,
+
+        /// password for encryption (only supported by zip and 7z)
+        #[arg(long)]
+        password: Option<String>,
     },
 
     /// extract archives (auto-detects format: .zst, .tgz, .txz, .zip, .7z)
@@ -72,12 +76,23 @@ pub enum Commands {
         /// overwrite existing files
         #[arg(long)]
         overwrite: bool,
+
+        /// password for decryption (for zip and 7z)
+        #[arg(long)]
+        password: Option<String>,
     },
 
     /// list archive contents
     #[command(alias = "l")]
     List {
         /// archive file to list
+        archive: PathBuf,
+    },
+
+    /// test archive integrity
+    #[command(alias = "t")]
+    Test {
+        /// archive file to test
         archive: PathBuf,
     },
 }
