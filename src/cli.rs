@@ -105,7 +105,10 @@ impl Cli {
     ) -> PathBuf {
         output.unwrap_or_else(|| {
             let mut path = input.to_path_buf();
-            let extension = format.map(|f| f.extension()).unwrap_or("zst"); // default to zst format
+            let extension = match format {
+                Some(f) => f.extension(),
+                None => "zst",
+            };
 
             if let Some(filename) = path.file_name() {
                 let mut new_filename = filename.to_os_string();

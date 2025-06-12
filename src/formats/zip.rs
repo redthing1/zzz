@@ -8,9 +8,10 @@ use crate::{
     progress::Progress,
     utils, Result,
 };
+use anyhow::Context;
 use std::{
     fs::File,
-    io::{BufReader, BufWriter, Read, Write},
+    io::{BufReader, BufWriter},
     path::Path,
 };
 use walkdir::WalkDir;
@@ -27,12 +28,17 @@ impl CompressionFormat for ZipFormat {
         progress: Option<&Progress>,
     ) -> Result<CompressionStats> {
         let input_size = if input_path.is_file() {
-            std::fs::metadata(input_path)?.len()
+            std::fs::metadata(input_path)
+                .with_context(|| {
+                    format!("Failed to read metadata for input {}", input_path.display())
+                })?
+                .len()
         } else {
             utils::calculate_directory_size(input_path, filter)?
         };
 
-        let output_file = File::create(output_path)?;
+        let output_file = File::create(output_path)
+            .with_context(|| format!("Failed to create output file {}", output_path.display()))?;
         let buf_writer = BufWriter::new(output_file);
         let mut zip_writer = ZipWriter::new(buf_writer);
 
@@ -51,13 +57,17 @@ impl CompressionFormat for ZipFormat {
             let filename = input_path
                 .file_name()
                 .and_then(|n| n.to_str())
-                .ok_or_else(|| anyhow::anyhow!("invalid filename"))?;
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Could not determine filename from input path: {}",
+                        input_path.display()
+                    )
+                })?;
             zip_writer.start_file(filename, file_options)?;
 
-            let mut file = File::open(input_path)?;
-            let mut buffer = Vec::new();
-            file.read_to_end(&mut buffer)?;
-            zip_writer.write_all(&buffer)?;
+            let mut file = File::open(input_path)
+                .with_context(|| format!("Failed to open input file {}", input_path.display()))?;
+            std::io::copy(&mut file, &mut zip_writer)?;
         } else {
             // Directory compression
             let base_path = input_path.parent().unwrap_or(input_path);
@@ -82,10 +92,10 @@ impl CompressionFormat for ZipFormat {
                 if path.is_file() {
                     zip_writer.start_file(path_str.as_ref(), file_options)?;
 
-                    let mut file = File::open(path)?;
-                    let mut buffer = Vec::new();
-                    file.read_to_end(&mut buffer)?;
-                    zip_writer.write_all(&buffer)?;
+                    let mut file = File::open(path).with_context(|| {
+                        format!("Failed to open file for archiving {}", path.display())
+                    })?;
+                    std::io::copy(&mut file, &mut zip_writer)?;
 
                     let metadata = entry.metadata()?;
                     processed_size += metadata.len();
@@ -108,9 +118,12 @@ impl CompressionFormat for ZipFormat {
     }
 
     fn extract(archive_path: &Path, output_dir: &Path, options: &ExtractionOptions) -> Result<()> {
-        let file = File::open(archive_path)?;
+        let file = File::open(archive_path)
+            .with_context(|| format!("Failed to open archive file {}", archive_path.display()))?;
         let buf_reader = BufReader::new(file);
-        let mut archive = ZipArchive::new(buf_reader)?;
+        let mut archive = ZipArchive::new(buf_reader).with_context(|| {
+            format!("Failed to read ZIP archive from {}", archive_path.display())
+        })?;
 
         std::fs::create_dir_all(output_dir)?;
 

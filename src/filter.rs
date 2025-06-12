@@ -2,6 +2,7 @@
 
 use crate::Result;
 use glob::Pattern;
+use once_cell::sync::Lazy;
 use std::path::Path;
 
 /// comprehensive list of garbage files to exclude by default
@@ -66,6 +67,13 @@ pub const GARBAGE_FILES: &[&str] = &[
     ".*.sw?", // vim swap file pattern
 ];
 
+static COMPILED_GARBAGE_PATTERNS: Lazy<Vec<Pattern>> = Lazy::new(|| {
+    GARBAGE_FILES
+        .iter()
+        .filter_map(|s| Pattern::new(s).ok())
+        .collect()
+});
+
 pub struct FileFilter {
     use_defaults: bool,
     custom_excludes: Vec<Pattern>,
@@ -97,11 +105,9 @@ impl FileFilter {
 
         // check default garbage files if enabled
         if self.use_defaults {
-            for garbage_pattern in GARBAGE_FILES {
-                if let Ok(pattern) = Pattern::new(garbage_pattern) {
-                    if pattern.matches(filename) {
-                        return true;
-                    }
+            for pattern in &*COMPILED_GARBAGE_PATTERNS {
+                if pattern.matches(filename) {
+                    return true;
                 }
             }
         }

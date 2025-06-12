@@ -8,6 +8,7 @@ use crate::{
     progress::Progress,
     utils, Result,
 };
+use anyhow::Context;
 use std::{
     fs::File,
     io::{BufReader, BufWriter},
@@ -31,12 +32,17 @@ impl CompressionFormat for XzFormat {
         progress: Option<&Progress>,
     ) -> Result<CompressionStats> {
         let input_size = if input_path.is_file() {
-            std::fs::metadata(input_path)?.len()
+            std::fs::metadata(input_path)
+                .with_context(|| {
+                    format!("Failed to read metadata for input {}", input_path.display())
+                })?
+                .len()
         } else {
             utils::calculate_directory_size(input_path, filter)?
         };
 
-        let output_file = File::create(output_path)?;
+        let output_file = File::create(output_path)
+            .with_context(|| format!("Failed to create output file {}", output_path.display()))?;
         let buf_writer = BufWriter::new(output_file);
 
         // Map compression level (1-22) to xz level (0-9)
@@ -53,16 +59,31 @@ impl CompressionFormat for XzFormat {
 
         if input_path.is_file() {
             // Single file compression
-            let file = File::open(input_path)?;
+            let file = File::open(input_path)
+                .with_context(|| format!("Failed to open input file {}", input_path.display()))?;
             let mut header = tar::Header::new_gnu();
-            header.set_size(std::fs::metadata(input_path)?.len());
+            header.set_size(
+                std::fs::metadata(input_path)
+                    .with_context(|| {
+                        format!(
+                            "Failed to read metadata for input file {}",
+                            input_path.display()
+                        )
+                    })?
+                    .len(),
+            );
             header.set_mode(0o644);
             header.set_cksum();
 
             let filename = input_path
                 .file_name()
                 .and_then(|n| n.to_str())
-                .ok_or_else(|| anyhow::anyhow!("invalid filename"))?;
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Could not determine filename from input path: {}",
+                        input_path.display()
+                    )
+                })?;
             tar_builder.append_data(&mut header, filename, file)?;
         } else {
             // Directory compression
@@ -85,7 +106,9 @@ impl CompressionFormat for XzFormat {
                 let relative_path = path.strip_prefix(base_path)?;
 
                 if path.is_file() {
-                    let file = File::open(path)?;
+                    let file = File::open(path).with_context(|| {
+                        format!("Failed to open file for archiving {}", path.display())
+                    })?;
                     let metadata = entry.metadata()?;
                     let mut header = tar::Header::new_gnu();
 
@@ -155,7 +178,8 @@ impl CompressionFormat for XzFormat {
     }
 
     fn extract(archive_path: &Path, output_dir: &Path, options: &ExtractionOptions) -> Result<()> {
-        let file = File::open(archive_path)?;
+        let file = File::open(archive_path)
+            .with_context(|| format!("Failed to open archive file {}", archive_path.display()))?;
         let buf_reader = BufReader::new(file);
         let decoder = XzDecoder::new(buf_reader);
         let mut archive = Archive::new(decoder);
@@ -188,7 +212,10 @@ impl CompressionFormat for XzFormat {
 
             // Check for overwrites
             if target_path.exists() && !options.overwrite {
-                continue;
+                return Err(anyhow::anyhow!(
+                    "output file '{}' already exists. Use --overwrite to replace.",
+                    target_path.display()
+                ));
             }
 
             if let Some(parent) = target_path.parent() {
@@ -202,7 +229,12 @@ impl CompressionFormat for XzFormat {
     }
 
     fn list(archive_path: &Path) -> Result<Vec<ArchiveEntry>> {
-        let file = File::open(archive_path)?;
+        let file = File::open(archive_path).with_context(|| {
+            format!(
+                "Failed to open archive for listing {}",
+                archive_path.display()
+            )
+        })?;
         let buf_reader = BufReader::new(file);
         let decoder = XzDecoder::new(buf_reader);
         let mut archive = Archive::new(decoder);

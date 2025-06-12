@@ -8,7 +8,8 @@ use crate::{
     progress::Progress,
     utils, Result,
 };
-use sevenz_rust::{Password, SevenZReader, SevenZWriter};
+use anyhow::Context;
+use sevenz_rust::{Password, SevenZArchiveEntry, SevenZReader, SevenZWriter};
 use std::{fs::File, path::Path};
 use walkdir::WalkDir;
 
@@ -23,12 +24,21 @@ impl CompressionFormat for SevenZFormat {
         progress: Option<&Progress>,
     ) -> Result<CompressionStats> {
         let input_size = if input_path.is_file() {
-            std::fs::metadata(input_path)?.len()
+            std::fs::metadata(input_path)
+                .with_context(|| {
+                    format!("Failed to read metadata for input {}", input_path.display())
+                })?
+                .len()
         } else {
             utils::calculate_directory_size(input_path, filter)?
         };
 
-        let mut sz = SevenZWriter::create(output_path)?;
+        let mut sz = SevenZWriter::create(output_path).with_context(|| {
+            format!(
+                "Failed to create 7-Zip writer for {}",
+                output_path.display()
+            )
+        })?;
 
         if let Some(progress) = progress {
             progress.set_length(input_size);
@@ -39,10 +49,19 @@ impl CompressionFormat for SevenZFormat {
             let filename = input_path
                 .file_name()
                 .and_then(|n| n.to_str())
-                .ok_or_else(|| anyhow::anyhow!("invalid filename"))?;
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Could not determine filename from input path: {}",
+                        input_path.display()
+                    )
+                })?;
+
+            let entry = SevenZArchiveEntry::from_path(input_path, filename.to_string());
             sz.push_archive_entry(
-                sevenz_rust::SevenZArchiveEntry::from_path(input_path, filename.to_string()),
-                Some(File::open(input_path)?),
+                entry,
+                Some(File::open(input_path).with_context(|| {
+                    format!("Failed to open input file {}", input_path.display())
+                })?),
             )?;
         } else {
             // Directory compression
@@ -66,12 +85,17 @@ impl CompressionFormat for SevenZFormat {
                 let path_str = relative_path.to_string_lossy().to_string();
 
                 if path.is_file() {
+                    let archive_entry = SevenZArchiveEntry::from_path(path, path_str);
                     sz.push_archive_entry(
-                        sevenz_rust::SevenZArchiveEntry::from_path(path, path_str),
-                        Some(File::open(path)?),
+                        archive_entry,
+                        Some(File::open(path).with_context(|| {
+                            format!("Failed to open file for archiving {}", path.display())
+                        })?),
                     )?;
 
-                    let metadata = entry.metadata()?;
+                    let metadata = entry.metadata().with_context(|| {
+                        format!("Failed to read metadata for {}", path.display())
+                    })?;
                     processed_size += metadata.len();
 
                     if let Some(progress) = progress {
@@ -79,24 +103,36 @@ impl CompressionFormat for SevenZFormat {
                     }
                 } else if path.is_dir() {
                     // Add directory entry
-                    let mut entry = sevenz_rust::SevenZArchiveEntry::new();
-                    entry.name = path_str;
-                    entry.is_directory = true;
-                    sz.push_archive_entry(entry, None::<std::io::Empty>)?;
+                    let mut archive_entry = SevenZArchiveEntry::new();
+                    archive_entry.name = path_str;
+                    archive_entry.is_directory = true;
+                    sz.push_archive_entry(archive_entry, None::<std::io::Empty>)?;
                 }
             }
         }
 
-        sz.finish()?;
+        sz.finish().with_context(|| {
+            format!("Failed to finalize 7-Zip archive {}", output_path.display())
+        })?;
 
-        let output_size = std::fs::metadata(output_path)?.len();
+        let output_size = std::fs::metadata(output_path)
+            .with_context(|| {
+                format!(
+                    "Failed to read metadata for output file {}",
+                    output_path.display()
+                )
+            })?
+            .len();
         Ok(CompressionStats::new(input_size, output_size))
     }
 
     fn extract(archive_path: &Path, output_dir: &Path, options: &ExtractionOptions) -> Result<()> {
-        let mut sz = SevenZReader::open(archive_path, Password::empty())?;
+        let mut sz = SevenZReader::open(archive_path, Password::empty())
+            .with_context(|| format!("Failed to open 7-Zip archive {}", archive_path.display()))?;
 
-        std::fs::create_dir_all(output_dir)?;
+        std::fs::create_dir_all(output_dir).with_context(|| {
+            format!("Failed to create output directory {}", output_dir.display())
+        })?;
 
         sz.for_each_entries(|entry, reader| {
             let file_path = std::path::Path::new(&entry.name);

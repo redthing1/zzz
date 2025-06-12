@@ -1,6 +1,7 @@
 //! compression format abstraction
 
 use crate::Result;
+use anyhow::Context;
 use std::path::Path;
 
 pub mod gz;
@@ -123,7 +124,12 @@ impl Format {
         use std::fs::File;
         use std::io::Read;
 
-        let mut file = File::open(path)?;
+        let mut file = File::open(path).with_context(|| {
+            format!(
+                "Failed to open file for magic number detection: {}",
+                path.display()
+            )
+        })?;
         let mut buffer = [0u8; 16];
         let bytes_read = file.read(&mut buffer)?;
 
@@ -145,14 +151,23 @@ impl Format {
         }
 
         // Use tree_magic_mini as final fallback
-        let mime_type = tree_magic_mini::from_filepath(path);
-        match mime_type.unwrap_or("") {
-            "application/zstd" => Ok(Format::Zstd),
-            "application/gzip" | "application/x-gzip" => Ok(Format::Gzip),
-            "application/x-xz" => Ok(Format::Xz),
-            "application/zip" => Ok(Format::Zip),
-            "application/x-7z-compressed" => Ok(Format::SevenZ),
-            _ => Err(anyhow::anyhow!("unsupported archive format")),
+        match tree_magic_mini::from_filepath(path) {
+            Some(mime_type) => match mime_type {
+                "application/zstd" => Ok(Format::Zstd),
+                "application/gzip" | "application/x-gzip" => Ok(Format::Gzip),
+                "application/x-xz" => Ok(Format::Xz),
+                "application/zip" => Ok(Format::Zip),
+                "application/x-7z-compressed" => Ok(Format::SevenZ),
+                _ => Err(anyhow::anyhow!(
+                    "unsupported archive format (unknown mime type from tree_magic_mini: {})",
+                    mime_type
+                )),
+            },
+            None => {
+                Err(anyhow::anyhow!(
+                    "failed to determine mime type using tree_magic_mini (returned None)"
+                ))
+            }
         }
     }
 
