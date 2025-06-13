@@ -1,8 +1,8 @@
 //! extraction orchestration
 
 use crate::formats::{
-    gz::GzipFormat, sevenz::SevenZFormat, xz::XzFormat, zip::ZipFormat, zstd::ZstdFormat,
-    CompressionFormat, ExtractionOptions, Format,
+    gz::GzipFormat, rar::RarFormat, sevenz::SevenZFormat, xz::XzFormat, zip::ZipFormat,
+    zstd::ZstdFormat, CompressionFormat, ExtractionOptions, Format,
 };
 use crate::Result;
 use std::path::Path;
@@ -41,6 +41,7 @@ pub fn extract(
         Format::Xz => XzFormat::extract(archive_path, output_dir, &options)?,
         Format::Zip => ZipFormat::extract(archive_path, output_dir, &options)?,
         Format::SevenZ => SevenZFormat::extract(archive_path, output_dir, &options)?,
+        Format::Rar => RarFormat::extract(archive_path, output_dir, &options)?,
     }
 
     if verbose {

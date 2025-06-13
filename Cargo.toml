@@ -1,6 +1,6 @@
 [package]
 name = "zzz-arc"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "A fast compression multitool supporting zst, tgz, txz, zip, and 7z formats with optional encryption"
 license = "MIT"
@@ -36,6 +36,12 @@ zip = { version = "0.6", features = ["deflate", "time"] }     # zip
 sevenz-rust = { version = "0.6", features = ["aes256"] }  # 7z
 # magic number detection
 tree_magic_mini = "3.1"
+# rar support (optional)
+unrar = { version = "0.5", optional = true }
+
+[features]
+default = []
+rar = ["unrar"]
 
 [dev-dependencies]
 tempfile = "3.8"

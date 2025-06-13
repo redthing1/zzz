@@ -5,6 +5,7 @@ use anyhow::Context;
 use std::path::Path;
 
 pub mod gz;
+pub mod rar;
 pub mod sevenz;
 pub mod xz;
 pub mod zip;
@@ -79,6 +80,7 @@ pub enum Format {
     Xz,
     Zip,
     SevenZ,
+    Rar,
 }
 
 impl Format {
@@ -117,6 +119,8 @@ impl Format {
             Some(Format::Zip)
         } else if filename.ends_with(".7z") {
             Some(Format::SevenZ)
+        } else if filename.ends_with(".rar") {
+            Some(Format::Rar)
         } else {
             None
         }
@@ -153,6 +157,14 @@ impl Format {
             return Ok(Format::SevenZ); // 7-Zip
         }
 
+        if bytes_read >= 7 && &buffer[..7] == b"Rar!\x1A\x07\x00" {
+            return Ok(Format::Rar); // RAR v4
+        }
+
+        if bytes_read >= 8 && &buffer[..8] == b"Rar!\x1A\x07\x01\x00" {
+            return Ok(Format::Rar); // RAR v5
+        }
+
         // Use tree_magic_mini as final fallback
         match tree_magic_mini::from_filepath(path) {
             Some(mime_type) => match mime_type {
@@ -161,6 +173,7 @@ impl Format {
                 "application/x-xz" => Ok(Format::Xz),
                 "application/zip" => Ok(Format::Zip),
                 "application/x-7z-compressed" => Ok(Format::SevenZ),
+                "application/x-rar-compressed" | "application/vnd.rar" => Ok(Format::Rar),
                 _ => Err(anyhow::anyhow!(
                     "unsupported archive format (unknown mime type from tree_magic_mini: {})",
                     mime_type
@@ -180,6 +193,7 @@ impl Format {
             Format::Xz => "txz",
             Format::Zip => "zip",
             Format::SevenZ => "7z",
+            Format::Rar => "rar",
         }
     }
 
@@ -191,6 +205,7 @@ impl Format {
             Format::Xz => "XZ",
             Format::Zip => "ZIP",
             Format::SevenZ => "7-Zip",
+            Format::Rar => "RAR",
         }
     }
 }

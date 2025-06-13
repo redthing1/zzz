@@ -2,8 +2,8 @@
 
 use crate::filter::FileFilter;
 use crate::formats::{
-    gz::GzipFormat, sevenz::SevenZFormat, xz::XzFormat, zip::ZipFormat, zstd::ZstdFormat,
-    CompressionFormat, CompressionOptions, CompressionStats, Format,
+    gz::GzipFormat, rar::RarFormat, sevenz::SevenZFormat, xz::XzFormat, zip::ZipFormat,
+    zstd::ZstdFormat, CompressionFormat, CompressionOptions, CompressionStats, Format,
 };
 use crate::progress::Progress;
 use crate::Result;
@@ -56,6 +56,9 @@ pub fn compress(
         }
         Format::SevenZ => {
             SevenZFormat::compress(input_path, output_path, &options, &filter, Some(&progress))?
+        }
+        Format::Rar => {
+            RarFormat::compress(input_path, output_path, &options, &filter, Some(&progress))?
         }
     };
 

@@ -117,6 +117,9 @@ fn run(cli: Cli) -> zzz_arc::Result<()> {
                 zzz_arc::formats::Format::Zstd => {
                     zzz_arc::formats::zstd::ZstdFormat::test_integrity(&archive)?
                 }
+                zzz_arc::formats::Format::Rar => {
+                    zzz_arc::formats::rar::RarFormat::test_integrity(&archive)?
+                }
             }
 
             println!("{} integrity: OK", archive.display());

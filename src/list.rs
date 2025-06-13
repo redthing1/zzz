@@ -1,8 +1,8 @@
 //! archive listing functionality
 
 use crate::formats::{
-    gz::GzipFormat, sevenz::SevenZFormat, xz::XzFormat, zip::ZipFormat, zstd::ZstdFormat,
-    CompressionFormat, Format,
+    gz::GzipFormat, rar::RarFormat, sevenz::SevenZFormat, xz::XzFormat, zip::ZipFormat,
+    zstd::ZstdFormat, CompressionFormat, Format,
 };
 use crate::Result;
 use std::path::Path;
@@ -27,6 +27,7 @@ pub fn list(archive_path: &Path, verbose: bool) -> Result<()> {
         Format::Xz => XzFormat::list(archive_path)?,
         Format::Zip => ZipFormat::list(archive_path)?,
         Format::SevenZ => SevenZFormat::list(archive_path)?,
+        Format::Rar => RarFormat::list(archive_path)?,
     };
 
     for entry in entries {
