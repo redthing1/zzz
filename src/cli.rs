@@ -19,7 +19,7 @@ pub struct Cli {
     pub verbose: bool,
 
     /// number of threads (0 = auto-detect)
-    #[arg(long, global = true, default_value = "0")]
+    #[arg(short = 'j', long, global = true, default_value = "0")]
     pub threads: u32,
 }
 
@@ -41,11 +41,11 @@ pub enum Commands {
         progress: bool,
 
         /// exclude files matching pattern (repeatable)
-        #[arg(long)]
+        #[arg(short = 'e', long)]
         exclude: Vec<String>,
 
         /// disable built-in garbage file filtering
-        #[arg(long)]
+        #[arg(short = 'E', long)]
         no_default_excludes: bool,
 
         /// force specific format (zst, tgz, txz, zip, 7z)
@@ -56,7 +56,7 @@ pub enum Commands {
         input: PathBuf,
 
         /// password for encryption (supported by zst and 7z)
-        #[arg(long)]
+        #[arg(short = 'p', long)]
         password: Option<String>,
     },
 
@@ -74,11 +74,11 @@ pub enum Commands {
         directory: Option<PathBuf>,
 
         /// overwrite existing files
-        #[arg(long)]
+        #[arg(short = 'w', long)]
         overwrite: bool,
 
         /// password for decryption (for zst and 7z)
-        #[arg(long)]
+        #[arg(short = 'p', long)]
         password: Option<String>,
     },
 
