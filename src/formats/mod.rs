@@ -220,7 +220,12 @@ pub trait CompressionFormat {
         progress: Option<&crate::progress::Progress>,
     ) -> Result<CompressionStats>;
 
-    fn extract(archive_path: &Path, output_dir: &Path, options: &ExtractionOptions) -> Result<()>;
+    fn extract(
+        archive_path: &Path,
+        output_dir: &Path,
+        options: &ExtractionOptions,
+        progress: Option<&crate::progress::Progress>,
+    ) -> Result<()>;
 
     fn list(archive_path: &Path) -> Result<Vec<ArchiveEntry>>;
 

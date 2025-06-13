@@ -177,7 +177,12 @@ impl CompressionFormat for GzipFormat {
         Ok(CompressionStats::new(input_size, output_size))
     }
 
-    fn extract(archive_path: &Path, output_dir: &Path, options: &ExtractionOptions) -> Result<()> {
+    fn extract(
+        archive_path: &Path,
+        output_dir: &Path,
+        options: &ExtractionOptions,
+        progress: Option<&crate::progress::Progress>,
+    ) -> Result<()> {
         let file = File::open(archive_path)
             .with_context(|| format!("Failed to open archive file {}", archive_path.display()))?;
         let buf_reader = BufReader::new(file);
@@ -186,6 +191,7 @@ impl CompressionFormat for GzipFormat {
 
         std::fs::create_dir_all(output_dir)?;
 
+        let mut entry_count = 0u64;
         for entry in archive.entries()? {
             let mut entry = entry?;
             let path = entry.path()?;
@@ -223,6 +229,12 @@ impl CompressionFormat for GzipFormat {
             }
 
             entry.unpack(&target_path)?;
+
+            // Update progress
+            entry_count += 1;
+            if let Some(progress) = progress {
+                progress.set_position(entry_count);
+            }
         }
 
         Ok(())

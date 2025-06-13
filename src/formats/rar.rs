@@ -22,11 +22,17 @@ impl CompressionFormat for RarFormat {
         Err(anyhow::anyhow!("RAR compression is not supported"))
     }
 
-    fn extract(archive_path: &Path, output_dir: &Path, _options: &ExtractionOptions) -> Result<()> {
+    fn extract(
+        archive_path: &Path,
+        output_dir: &Path,
+        _options: &ExtractionOptions,
+        progress: Option<&crate::progress::Progress>,
+    ) -> Result<()> {
         use unrar::Archive;
 
         let mut archive = Archive::new(archive_path.to_str().unwrap()).open_for_processing()?;
 
+        let mut entry_count = 0u64;
         while let Some(header) = archive.read_header()? {
             let entry = header.entry();
 
@@ -40,6 +46,12 @@ impl CompressionFormat for RarFormat {
                 archive = header.extract_to(output_path)?;
             } else {
                 archive = header.skip()?;
+            }
+
+            // Update progress
+            entry_count += 1;
+            if let Some(progress) = progress {
+                progress.set_position(entry_count);
             }
         }
 
@@ -101,6 +113,7 @@ impl crate::formats::CompressionFormat for RarFormat {
         _archive_path: &std::path::Path,
         _output_dir: &std::path::Path,
         _options: &crate::formats::ExtractionOptions,
+        _progress: Option<&crate::progress::Progress>,
     ) -> crate::Result<()> {
         Err(rar_not_enabled_error())
     }

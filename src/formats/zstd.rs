@@ -305,7 +305,12 @@ impl CompressionFormat for ZstdFormat {
         Ok(CompressionStats::new(input_size, output_size))
     }
 
-    fn extract(archive_path: &Path, output_dir: &Path, options: &ExtractionOptions) -> Result<()> {
+    fn extract(
+        archive_path: &Path,
+        output_dir: &Path,
+        options: &ExtractionOptions,
+        progress: Option<&crate::progress::Progress>,
+    ) -> Result<()> {
         // open archive file
         let mut archive_file = File::open(archive_path)
             .with_context(|| format!("failed to open archive file: {}", archive_path.display()))?;
@@ -380,6 +385,7 @@ impl CompressionFormat for ZstdFormat {
         let mut archive = tar::Archive::new(decoder);
 
         // extract with safety checks
+        let mut entry_count = 0u64;
         for entry_result in archive.entries()? {
             let mut entry = entry_result?;
             let entry_path = entry.path()?;
@@ -410,6 +416,12 @@ impl CompressionFormat for ZstdFormat {
 
             // extract the entry
             entry.unpack(&output_path)?;
+
+            // Update progress
+            entry_count += 1;
+            if let Some(progress) = progress {
+                progress.set_position(entry_count);
+            }
         }
 
         Ok(())

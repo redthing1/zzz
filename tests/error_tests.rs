@@ -34,7 +34,7 @@ fn test_extract_nonexistent_archive() {
     fs::create_dir(&extract_dir).unwrap();
     let options = ExtractionOptions::default();
 
-    let result = ZstdFormat::extract(&nonexistent_archive, &extract_dir, &options);
+    let result = ZstdFormat::extract(&nonexistent_archive, &extract_dir, &options, None);
     assert!(result.is_err());
 
     let error_msg = result.unwrap_err().to_string();
@@ -64,7 +64,7 @@ fn test_extract_corrupted_archive() -> Result<()> {
     fs::create_dir(&extract_dir)?;
 
     let options = ExtractionOptions::default();
-    let result = ZstdFormat::extract(&corrupted_archive, &extract_dir, &options);
+    let result = ZstdFormat::extract(&corrupted_archive, &extract_dir, &options, None);
 
     assert!(result.is_err());
     let error_msg = result.unwrap_err().to_string();
@@ -138,7 +138,7 @@ fn test_extract_to_readonly_directory() -> Result<()> {
     }
 
     let extract_options = ExtractionOptions::default();
-    let result = ZstdFormat::extract(&archive_path, &readonly_dir, &extract_options);
+    let result = ZstdFormat::extract(&archive_path, &readonly_dir, &extract_options, None);
 
     // Restore permissions for cleanup
     #[cfg(unix)]
@@ -183,13 +183,13 @@ fn test_overwrite_protection() -> Result<()> {
         overwrite: false,
         ..Default::default()
     };
-    ZstdFormat::extract(&archive_path, &extract_dir, &extract_options)?;
+    ZstdFormat::extract(&archive_path, &extract_dir, &extract_options, None)?;
 
     // Modify the extracted file
     fs::write(&target_file, "modified")?;
 
     // Try to extract again without overwrite flag - should fail
-    let result = ZstdFormat::extract(&archive_path, &extract_dir, &extract_options);
+    let result = ZstdFormat::extract(&archive_path, &extract_dir, &extract_options, None);
     assert!(result.is_err());
 
     let error_msg = result.unwrap_err().to_string();
@@ -262,7 +262,7 @@ fn test_empty_directory_handling() -> Result<()> {
     // Extract and verify
     fs::create_dir(&extract_dir)?;
     let extract_options = ExtractionOptions::default();
-    ZstdFormat::extract(&archive_path, &extract_dir, &extract_options)?;
+    ZstdFormat::extract(&archive_path, &extract_dir, &extract_options, None)?;
 
     // Empty directory should be recreated
     assert!(extract_dir.join("empty").exists());
@@ -294,7 +294,7 @@ fn test_very_long_filename() -> Result<()> {
             let extract_dir = temp_dir.path().join("extract");
             fs::create_dir(&extract_dir)?;
             let extract_options = ExtractionOptions::default();
-            ZstdFormat::extract(&archive_path, &extract_dir, &extract_options)?;
+            ZstdFormat::extract(&archive_path, &extract_dir, &extract_options, None)?;
 
             let extracted_file = extract_dir.join(&long_name);
             assert!(extracted_file.exists());
@@ -349,7 +349,7 @@ fn test_zero_byte_file() -> Result<()> {
     // Extract
     fs::create_dir(&extract_dir)?;
     let extract_options = ExtractionOptions::default();
-    ZstdFormat::extract(&archive_path, &extract_dir, &extract_options)?;
+    ZstdFormat::extract(&archive_path, &extract_dir, &extract_options, None)?;
 
     // Verify empty file was extracted
     let extracted_file = extract_dir.join("empty.txt");

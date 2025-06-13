@@ -56,7 +56,7 @@ fn test_compress_and_extract_single_file() -> Result<()> {
     // Extract
     fs::create_dir(&extract_dir)?;
     let extract_options = ExtractionOptions::default();
-    ZstdFormat::extract(&archive_path, &extract_dir, &extract_options)?;
+    ZstdFormat::extract(&archive_path, &extract_dir, &extract_options, None)?;
 
     // Verify extracted file
     let extracted_file = extract_dir.join("test.txt");
@@ -94,7 +94,7 @@ fn test_compress_and_extract_directory() -> Result<()> {
     // Extract
     fs::create_dir(&extract_dir)?;
     let extract_options = ExtractionOptions::default();
-    ZstdFormat::extract(&archive_path, &extract_dir, &extract_options)?;
+    ZstdFormat::extract(&archive_path, &extract_dir, &extract_options, None)?;
 
     // Verify extracted structure
     assert!(extract_dir.join("source/file1.txt").exists());
@@ -210,7 +210,7 @@ fn test_custom_exclude_patterns() -> Result<()> {
     // Extract and verify filtering
     fs::create_dir(&extract_dir)?;
     let extract_options = ExtractionOptions::default();
-    ZstdFormat::extract(&archive_path, &extract_dir, &extract_options)?;
+    ZstdFormat::extract(&archive_path, &extract_dir, &extract_options, None)?;
 
     // Should include
     assert!(extract_dir.join("source/important.txt").exists());
@@ -244,7 +244,7 @@ fn test_no_default_excludes() -> Result<()> {
     // Extract and verify no filtering occurred
     fs::create_dir(&extract_dir)?;
     let extract_options = ExtractionOptions::default();
-    ZstdFormat::extract(&archive_path, &extract_dir, &extract_options)?;
+    ZstdFormat::extract(&archive_path, &extract_dir, &extract_options, None)?;
 
     // All files should be present
     assert!(extract_dir.join("source/normal.txt").exists());
@@ -271,13 +271,13 @@ fn test_overwrite_protection() -> Result<()> {
     // Extract once
     fs::create_dir(&extract_dir)?;
     let extract_options = ExtractionOptions::default();
-    ZstdFormat::extract(&archive_path, &extract_dir, &extract_options)?;
+    ZstdFormat::extract(&archive_path, &extract_dir, &extract_options, None)?;
 
     // Modify extracted file
     fs::write(&target_file, "modified content")?;
 
     // Try to extract again without overwrite - should fail
-    let result = ZstdFormat::extract(&archive_path, &extract_dir, &extract_options);
+    let result = ZstdFormat::extract(&archive_path, &extract_dir, &extract_options, None);
     assert!(result.is_err());
 
     // File should still have modified content
@@ -288,7 +288,7 @@ fn test_overwrite_protection() -> Result<()> {
         overwrite: true,
         ..Default::default()
     };
-    ZstdFormat::extract(&archive_path, &extract_dir, &overwrite_options)?;
+    ZstdFormat::extract(&archive_path, &extract_dir, &overwrite_options, None)?;
 
     // File should be restored to original content
     assert_eq!(fs::read_to_string(&target_file)?, "original content");

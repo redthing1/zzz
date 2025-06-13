@@ -131,7 +131,12 @@ impl CompressionFormat for ZipFormat {
         Ok(CompressionStats::new(input_size, output_size))
     }
 
-    fn extract(archive_path: &Path, output_dir: &Path, options: &ExtractionOptions) -> Result<()> {
+    fn extract(
+        archive_path: &Path,
+        output_dir: &Path,
+        options: &ExtractionOptions,
+        progress: Option<&crate::progress::Progress>,
+    ) -> Result<()> {
         // Password protection is not supported for ZIP format
         if options.password.is_some() {
             return Err(anyhow::anyhow!("Password protection is not supported for ZIP format. Use 7z format for password protection."));
@@ -145,6 +150,11 @@ impl CompressionFormat for ZipFormat {
         })?;
 
         std::fs::create_dir_all(output_dir)?;
+
+        let total_files = archive.len();
+        if let Some(progress) = progress {
+            progress.set_length(total_files as u64);
+        }
 
         for i in 0..archive.len() {
             let mut file = archive.by_index(i)?;
@@ -184,6 +194,11 @@ impl CompressionFormat for ZipFormat {
             } else {
                 let mut output_file = File::create(&target_path)?;
                 std::io::copy(&mut file, &mut output_file)?;
+            }
+
+            // Update progress
+            if let Some(progress) = progress {
+                progress.set_position((i + 1) as u64);
             }
         }
 

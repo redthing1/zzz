@@ -184,7 +184,7 @@ fn test_extraction_performance() -> Result<()> {
     let extract_options = zzz_arc::formats::ExtractionOptions::default();
 
     let start = Instant::now();
-    ZstdFormat::extract(&archive_path, &extract_dir, &extract_options)?;
+    ZstdFormat::extract(&archive_path, &extract_dir, &extract_options, None)?;
     let duration = start.elapsed();
 
     println!("Extraction (50 × 2KB files): {duration:?}");

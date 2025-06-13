@@ -135,7 +135,12 @@ impl CompressionFormat for SevenZFormat {
         Ok(CompressionStats::new(input_size, output_size))
     }
 
-    fn extract(archive_path: &Path, output_dir: &Path, options: &ExtractionOptions) -> Result<()> {
+    fn extract(
+        archive_path: &Path,
+        output_dir: &Path,
+        options: &ExtractionOptions,
+        progress: Option<&crate::progress::Progress>,
+    ) -> Result<()> {
         let password = options
             .password
             .as_ref()
@@ -170,6 +175,13 @@ impl CompressionFormat for SevenZFormat {
             format!("Failed to create output directory {}", output_dir.display())
         })?;
 
+        // Get entry count for progress
+        let entry_count = sz.archive().files.len();
+        if let Some(progress) = progress {
+            progress.set_length(entry_count as u64);
+        }
+
+        let mut processed_count = 0;
         sz.for_each_entries(|entry, reader| {
             let file_path = std::path::Path::new(&entry.name);
 
@@ -207,6 +219,12 @@ impl CompressionFormat for SevenZFormat {
             } else {
                 let mut output_file = File::create(&target_path)?;
                 std::io::copy(reader, &mut output_file)?;
+            }
+
+            // Update progress
+            processed_count += 1;
+            if let Some(progress) = progress {
+                progress.set_position(processed_count);
             }
 
             Ok(true)
