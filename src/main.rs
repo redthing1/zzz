@@ -2,7 +2,7 @@
 
 use clap::Parser;
 use std::process;
-use zzz::{
+use zzz_arc::{
     cli::{Cli, Commands},
     compress, extract,
     filter::FileFilter,
@@ -19,7 +19,7 @@ fn main() {
     }
 }
 
-fn run(cli: Cli) -> zzz::Result<()> {
+fn run(cli: Cli) -> zzz_arc::Result<()> {
     match cli.command {
         Commands::Compress {
             input,
@@ -39,7 +39,7 @@ fn run(cli: Cli) -> zzz::Result<()> {
                     "output file '{}' already exists. overwrite?",
                     output_path.display()
                 );
-                if !zzz::utils::prompt_yes_no(&prompt_message) {
+                if !zzz_arc::utils::prompt_yes_no(&prompt_message) {
                     println!("operation cancelled");
                     return Ok(());
                 }
@@ -68,9 +68,9 @@ fn run(cli: Cli) -> zzz::Result<()> {
                 println!(
                     "compressed {} ({}) -> {} ({})",
                     input.display(),
-                    zzz::utils::format_bytes(stats.input_size),
+                    zzz_arc::utils::format_bytes(stats.input_size),
                     output_path.display(),
-                    zzz::utils::format_bytes(stats.output_size)
+                    zzz_arc::utils::format_bytes(stats.output_size)
                 );
             }
         }
@@ -99,21 +99,23 @@ fn run(cli: Cli) -> zzz::Result<()> {
 
         Commands::Test { archive } => {
             // Detect format and test integrity
-            let format = zzz::formats::Format::detect(&archive)?;
+            let format = zzz_arc::formats::Format::detect(&archive)?;
 
             match format {
-                zzz::formats::Format::Zip => {
-                    zzz::formats::zip::ZipFormat::test_integrity(&archive)?
+                zzz_arc::formats::Format::Zip => {
+                    zzz_arc::formats::zip::ZipFormat::test_integrity(&archive)?
                 }
-                zzz::formats::Format::SevenZ => {
-                    zzz::formats::sevenz::SevenZFormat::test_integrity(&archive)?
+                zzz_arc::formats::Format::SevenZ => {
+                    zzz_arc::formats::sevenz::SevenZFormat::test_integrity(&archive)?
                 }
-                zzz::formats::Format::Gzip => {
-                    zzz::formats::gz::GzipFormat::test_integrity(&archive)?
+                zzz_arc::formats::Format::Gzip => {
+                    zzz_arc::formats::gz::GzipFormat::test_integrity(&archive)?
                 }
-                zzz::formats::Format::Xz => zzz::formats::xz::XzFormat::test_integrity(&archive)?,
-                zzz::formats::Format::Zstd => {
-                    zzz::formats::zstd::ZstdFormat::test_integrity(&archive)?
+                zzz_arc::formats::Format::Xz => {
+                    zzz_arc::formats::xz::XzFormat::test_integrity(&archive)?
+                }
+                zzz_arc::formats::Format::Zstd => {
+                    zzz_arc::formats::zstd::ZstdFormat::test_integrity(&archive)?
                 }
             }
 

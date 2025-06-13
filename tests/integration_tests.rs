@@ -3,9 +3,9 @@
 use std::fs;
 use std::path::Path;
 use tempfile::TempDir;
-use zzz::filter::FileFilter;
-use zzz::formats::zstd::ZstdFormat;
-use zzz::formats::{CompressionFormat, CompressionOptions, ExtractionOptions};
+use zzz_arc::filter::FileFilter;
+use zzz_arc::formats::zstd::ZstdFormat;
+use zzz_arc::formats::{CompressionFormat, CompressionOptions, ExtractionOptions};
 
 type Result<T> = anyhow::Result<T>;
 

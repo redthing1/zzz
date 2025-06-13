@@ -1,11 +1,19 @@
 [package]
-name = "zzz"
+name = "zzz-arc"
 version = "0.1.0"
 edition = "2021"
-description = "zzz: compression multitool"
+description = "A fast compression multitool supporting zst, tgz, txz, zip, and 7z formats with optional encryption"
 license = "MIT"
 repository = "https://github.com/redthing1/zzz"
 authors = ["redthing1 <redthing1@alt.icu>"]
+keywords = ["compression", "archive", "zstd", "cli", "encryption"]
+categories = ["command-line-utilities", "compression", "encoding"]
+readme = "README.md"
+homepage = "https://github.com/redthing1/zzz"
+
+[[bin]]
+name = "zzz"
+path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4.4", features = ["derive"] }

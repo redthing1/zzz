@@ -3,9 +3,9 @@
 use std::fs;
 use std::time::Instant;
 use tempfile::TempDir;
-use zzz::filter::FileFilter;
-use zzz::formats::zstd::ZstdFormat;
-use zzz::formats::{CompressionFormat, CompressionOptions};
+use zzz_arc::filter::FileFilter;
+use zzz_arc::formats::zstd::ZstdFormat;
+use zzz_arc::formats::{CompressionFormat, CompressionOptions};
 
 type Result<T> = anyhow::Result<T>;
 
@@ -181,7 +181,7 @@ fn test_extraction_performance() -> Result<()> {
 
     // Time extraction
     fs::create_dir(&extract_dir)?;
-    let extract_options = zzz::formats::ExtractionOptions::default();
+    let extract_options = zzz_arc::formats::ExtractionOptions::default();
 
     let start = Instant::now();
     ZstdFormat::extract(&archive_path, &extract_dir, &extract_options)?;
