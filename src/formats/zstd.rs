@@ -409,6 +409,17 @@ impl CompressionFormat for ZstdFormat {
                 );
             }
 
+            // Show verbose output for individual files
+            if let Some(progress) = progress {
+                if progress.is_verbose() {
+                    if entry.header().entry_type().is_dir() {
+                        println!("  creating: {}", entry_path.display());
+                    } else {
+                        println!("  extracting: {}", entry_path.display());
+                    }
+                }
+            }
+
             // ensure parent directory exists
             if let Some(parent) = output_path.parent() {
                 std::fs::create_dir_all(parent)?;

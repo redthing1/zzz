@@ -210,6 +210,17 @@ impl CompressionFormat for SevenZFormat {
                 return Ok(true);
             }
 
+            // Show verbose output for individual files
+            if let Some(progress) = progress {
+                if progress.is_verbose() {
+                    if entry.is_directory() {
+                        println!("  creating: {}", file_path.display());
+                    } else {
+                        println!("  extracting: {}", file_path.display());
+                    }
+                }
+            }
+
             if let Some(parent) = target_path.parent() {
                 std::fs::create_dir_all(parent)?;
             }

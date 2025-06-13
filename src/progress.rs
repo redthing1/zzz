@@ -61,6 +61,11 @@ impl Progress {
             bar.finish_and_clear();
         }
     }
+
+    /// check if verbose mode is enabled (progress bar exists)
+    pub fn is_verbose(&self) -> bool {
+        self.bar.is_some()
+    }
 }
 
 #[cfg(test)]
@@ -109,5 +114,16 @@ mod tests {
         // Should handle updates beyond total without panic
         progress.update(150);
         progress.finish();
+    }
+
+    #[test]
+    fn test_progress_is_verbose() {
+        // Enabled progress should be verbose
+        let progress_enabled = Progress::new(true, 1000);
+        assert!(progress_enabled.is_verbose());
+
+        // Disabled progress should not be verbose
+        let progress_disabled = Progress::new(false, 1000);
+        assert!(!progress_disabled.is_verbose());
     }
 }

@@ -224,6 +224,17 @@ impl CompressionFormat for GzipFormat {
                 ));
             }
 
+            // Show verbose output for individual files
+            if let Some(progress) = progress {
+                if progress.is_verbose() {
+                    if entry.header().entry_type().is_dir() {
+                        println!("  creating: {}", path.display());
+                    } else {
+                        println!("  extracting: {}", path.display());
+                    }
+                }
+            }
+
             if let Some(parent) = target_path.parent() {
                 std::fs::create_dir_all(parent)?;
             }
