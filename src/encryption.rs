@@ -1,15 +1,15 @@
 //! Encryption module for authenticated encryption of archives
-//! 
+//!
 //! This module provides authenticated encryption for ZSTD archives using:
 //! - Argon2id for key derivation from passwords
 //! - AES-256-GCM for streaming authenticated encryption
 //! - Chunked processing for memory efficiency
 
 use crate::Result;
-use anyhow::{Context, anyhow, bail};
+use anyhow::{anyhow, bail, Context};
 use argon2::Argon2;
 use rand::RngCore;
-use std::io::{self, Read, ErrorKind};
+use std::io::{self, ErrorKind, Read};
 
 // AES-GCM imports
 use aes_gcm::{
@@ -19,8 +19,8 @@ use aes_gcm::{
 
 // AES-256-GCM constants
 pub const AES_KEY_SIZE: usize = 32; // 256 bits
-pub const NONCE_SIZE: usize = 12;   // 96 bits, standard for GCM
-pub const TAG_SIZE: usize = 16;     // 128 bits, standard for GCM
+pub const NONCE_SIZE: usize = 12; // 96 bits, standard for GCM
+pub const TAG_SIZE: usize = 16; // 128 bits, standard for GCM
 
 // Argon2id parameters
 pub const ARGON2_SALT_LEN: usize = 16; // Bytes
@@ -40,7 +40,7 @@ pub const ENCRYPTION_HEADER_SIZE: usize = ENCRYPTED_ZSTD_MAGIC.len() + ARGON2_SA
 pub const DEFAULT_ENCRYPTION_CHUNK_SIZE: usize = 64 * 1024;
 
 /// Derive an AES-256 key from a password using Argon2id
-/// 
+///
 /// Returns (derived_key, salt) where salt is either the provided salt or a new random salt
 pub fn derive_key(password: &str, salt_opt: Option<&[u8]>) -> Result<(Vec<u8>, Vec<u8>)> {
     let salt = match salt_opt {
@@ -65,19 +65,25 @@ pub fn derive_key(password: &str, salt_opt: Option<&[u8]>) -> Result<(Vec<u8>, V
 
     // Use Argon2id with specified parameters
     use argon2::{Algorithm, Params, Version};
-    let params = Params::new(ARGON2_MEM_COST, ARGON2_TIME_COST, ARGON2_LANES, Some(AES_KEY_SIZE))
-        .map_err(|e| anyhow!("Failed to create Argon2 parameters: {}", e))?;
+    let params = Params::new(
+        ARGON2_MEM_COST,
+        ARGON2_TIME_COST,
+        ARGON2_LANES,
+        Some(AES_KEY_SIZE),
+    )
+    .map_err(|e| anyhow!("Failed to create Argon2 parameters: {}", e))?;
     let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
-    
+
     let mut derived_key = vec![0u8; AES_KEY_SIZE];
-    argon2.hash_password_into(password.as_bytes(), &salt, &mut derived_key)
+    argon2
+        .hash_password_into(password.as_bytes(), &salt, &mut derived_key)
         .map_err(|e| anyhow!("Argon2 key derivation failed: {}", e))?;
 
     Ok((derived_key, salt))
 }
 
 /// A writer that encrypts data in chunks using AES-256-GCM before writing to the underlying writer
-/// 
+///
 /// Each chunk is encrypted with a random nonce and written as:
 /// [nonce: 12 bytes][ciphertext_length: 4 bytes BE][ciphertext_with_tag: variable]
 pub struct EncryptingWriter<W: std::io::Write> {
@@ -90,7 +96,11 @@ pub struct EncryptingWriter<W: std::io::Write> {
 impl<W: std::io::Write> EncryptingWriter<W> {
     pub fn new(inner: W, key: &[u8], chunk_size: usize) -> Result<Self> {
         if key.len() != AES_KEY_SIZE {
-            return Err(anyhow!("Invalid key size for EncryptingWriter. Expected {}, got {}", AES_KEY_SIZE, key.len()));
+            return Err(anyhow!(
+                "Invalid key size for EncryptingWriter. Expected {}, got {}",
+                AES_KEY_SIZE,
+                key.len()
+            ));
         }
         let cipher = Aes256Gcm::new_from_slice(key)
             .map_err(|e| anyhow!("Failed to initialize AES-GCM cipher: {}", e))?;
@@ -115,18 +125,23 @@ impl<W: std::io::Write> EncryptingWriter<W> {
         let nonce = Nonce::from_slice(&nonce_bytes);
 
         // Encrypt the chunk (includes authentication tag)
-        let ciphertext_with_tag = self.cipher.encrypt(nonce, self.buffer.as_slice())
+        let ciphertext_with_tag = self
+            .cipher
+            .encrypt(nonce, self.buffer.as_slice())
             .map_err(|e| anyhow!("AES-GCM encryption failed: {}", e))?;
 
         // Write: nonce + length + ciphertext_with_tag
-        self.inner.write_all(&nonce_bytes)
+        self.inner
+            .write_all(&nonce_bytes)
             .context("Failed to write nonce to inner writer")?;
 
         let len_bytes = (ciphertext_with_tag.len() as u32).to_be_bytes();
-        self.inner.write_all(&len_bytes)
+        self.inner
+            .write_all(&len_bytes)
             .context("Failed to write ciphertext length to inner writer")?;
 
-        self.inner.write_all(&ciphertext_with_tag)
+        self.inner
+            .write_all(&ciphertext_with_tag)
             .context("Failed to write ciphertext with tag to inner writer")?;
 
         self.buffer.clear();
@@ -143,14 +158,15 @@ impl<W: std::io::Write> std::io::Write for EncryptingWriter<W> {
             let space_in_buffer = self.chunk_size - self.buffer.len();
             let bytes_to_buffer = std::cmp::min(space_in_buffer, input_remaining.len());
 
-            self.buffer.extend_from_slice(&input_remaining[..bytes_to_buffer]);
+            self.buffer
+                .extend_from_slice(&input_remaining[..bytes_to_buffer]);
             input_remaining = &input_remaining[bytes_to_buffer..];
             bytes_written_total += bytes_to_buffer;
 
             // If buffer is full, encrypt and write the chunk
             if self.buffer.len() == self.chunk_size {
                 self.encrypt_and_write_chunk()
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+                    .map_err(|e| std::io::Error::other(e.to_string()))?;
             }
         }
         Ok(bytes_written_total)
@@ -160,7 +176,7 @@ impl<W: std::io::Write> std::io::Write for EncryptingWriter<W> {
         // Encrypt and write any remaining data in buffer
         if !self.buffer.is_empty() {
             self.encrypt_and_write_chunk()
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))?;
+                .map_err(|e| std::io::Error::other(e.to_string()))?;
         }
         self.inner.flush()
     }
@@ -170,14 +186,14 @@ impl<W: std::io::Write> Drop for EncryptingWriter<W> {
     fn drop(&mut self) {
         if !self.buffer.is_empty() {
             if let Err(e) = self.encrypt_and_write_chunk() {
-                eprintln!("Error encrypting remaining chunk during drop: {}", e);
+                eprintln!("Error encrypting remaining chunk during drop: {e}");
             }
         }
     }
 }
 
 /// A reader that decrypts chunked AES-256-GCM encrypted data
-/// 
+///
 /// Reads chunks in format: [nonce: 12 bytes][ciphertext_length: 4 bytes BE][ciphertext_with_tag: variable]
 pub struct DecryptingReader<R: Read> {
     inner: R,
@@ -190,7 +206,11 @@ pub struct DecryptingReader<R: Read> {
 impl<R: Read> DecryptingReader<R> {
     pub fn new(inner: R, key: &[u8]) -> Result<Self> {
         if key.len() != AES_KEY_SIZE {
-             return Err(anyhow!("Invalid key size for DecryptingReader. Expected {}, got {}", AES_KEY_SIZE, key.len()));
+            return Err(anyhow!(
+                "Invalid key size for DecryptingReader. Expected {}, got {}",
+                AES_KEY_SIZE,
+                key.len()
+            ));
         }
         let cipher = Aes256Gcm::new_from_slice(key)
             .map_err(|e| anyhow!("Failed to initialize AES-GCM cipher: {}", e))?;
@@ -210,7 +230,7 @@ impl<R: Read> DecryptingReader<R> {
         // Read nonce
         let mut nonce_bytes = [0u8; NONCE_SIZE];
         match self.inner.read_exact(&mut nonce_bytes) {
-            Ok(()) => {},
+            Ok(()) => {}
             Err(e) if e.kind() == ErrorKind::UnexpectedEof => {
                 self.eof_reached = true;
                 return Ok(false);
@@ -222,11 +242,12 @@ impl<R: Read> DecryptingReader<R> {
         // Read ciphertext length
         let mut len_bytes = [0u8; 4];
         match self.inner.read_exact(&mut len_bytes) {
-             Ok(()) => {},
-             Err(e) if e.kind() == ErrorKind::UnexpectedEof => {
-                return Err(e).context("Failed to read ciphertext length (unexpected EOF after nonce)");
-             }
-             Err(e) => return Err(e).context("Failed to read ciphertext length from inner reader"),
+            Ok(()) => {}
+            Err(e) if e.kind() == ErrorKind::UnexpectedEof => {
+                return Err(e)
+                    .context("Failed to read ciphertext length (unexpected EOF after nonce)");
+            }
+            Err(e) => return Err(e).context("Failed to read ciphertext length from inner reader"),
         }
         let ct_with_tag_len = u32::from_be_bytes(len_bytes) as usize;
 
@@ -240,12 +261,20 @@ impl<R: Read> DecryptingReader<R> {
 
         // Read ciphertext with tag
         let mut ciphertext_with_tag = vec![0u8; ct_with_tag_len];
-        self.inner.read_exact(&mut ciphertext_with_tag)
+        self.inner
+            .read_exact(&mut ciphertext_with_tag)
             .context("Failed to read ciphertext with tag from inner reader")?;
 
         // Decrypt and verify
-        let plaintext = self.cipher.decrypt(nonce, ciphertext_with_tag.as_slice())
-            .map_err(|e| anyhow!("AES-GCM decryption failed (data integrity or key error): {}", e))?;
+        let plaintext = self
+            .cipher
+            .decrypt(nonce, ciphertext_with_tag.as_slice())
+            .map_err(|e| {
+                anyhow!(
+                    "AES-GCM decryption failed (data integrity or key error): {}",
+                    e
+                )
+            })?;
 
         self.buffer = plaintext;
         Ok(true)
@@ -260,7 +289,7 @@ impl<R: Read> Read for DecryptingReader<R> {
                 return Ok(0);
             }
             match self.read_and_decrypt_chunk() {
-                Ok(true) => {},
+                Ok(true) => {}
                 Ok(false) => {
                     self.eof_reached = true;
                     return Ok(0);
@@ -271,7 +300,10 @@ impl<R: Read> Read for DecryptingReader<R> {
                     } else {
                         ErrorKind::Other
                     };
-                    return Err(io::Error::new(io_err_kind, format!("Decryption error: {}", e)));
+                    return Err(io::Error::new(
+                        io_err_kind,
+                        format!("Decryption error: {e}"),
+                    ));
                 }
             }
         }
@@ -279,10 +311,11 @@ impl<R: Read> Read for DecryptingReader<R> {
         let bytes_to_read = std::cmp::min(buf.len(), self.buffer.len() - self.buffer_pos);
 
         if bytes_to_read == 0 && self.buffer_pos == self.buffer.len() && self.eof_reached {
-             return Ok(0);
+            return Ok(0);
         }
 
-        buf[..bytes_to_read].copy_from_slice(&self.buffer[self.buffer_pos..self.buffer_pos + bytes_to_read]);
+        buf[..bytes_to_read]
+            .copy_from_slice(&self.buffer[self.buffer_pos..self.buffer_pos + bytes_to_read]);
         self.buffer_pos += bytes_to_read;
 
         Ok(bytes_to_read)
@@ -379,7 +412,8 @@ mod tests {
 
         let mut encrypted_data = Vec::new();
         {
-            let mut enc_writer = EncryptingWriter::new(&mut encrypted_data, &key_encrypt, chunk_size)?;
+            let mut enc_writer =
+                EncryptingWriter::new(&mut encrypted_data, &key_encrypt, chunk_size)?;
             enc_writer.write_all(original_data)?;
         }
 
@@ -389,7 +423,10 @@ mod tests {
 
         assert!(result.is_err());
         if let Err(e) = result {
-            assert!(e.to_string().contains("AES-GCM decryption failed") || e.to_string().contains("Decryption error"));
+            assert!(
+                e.to_string().contains("AES-GCM decryption failed")
+                    || e.to_string().contains("Decryption error")
+            );
         }
         Ok(())
     }

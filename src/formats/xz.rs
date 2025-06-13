@@ -266,18 +266,22 @@ impl CompressionFormat for XzFormat {
         // For a raw .xz stream, try to decompress fully.
         use std::fs::File;
         use std::io::Read;
-        use xz2::read::XzDecoder;
         use tar::Archive;
+        use xz2::read::XzDecoder;
 
         let file = File::open(archive_path)?;
-        if archive_path.extension().map_or(false, |ext| ext == "txz") ||
-           archive_path.file_name().map_or(false, |name| name.to_string_lossy().ends_with(".tar.xz")) {
+        if archive_path.extension().is_some_and(|ext| ext == "txz")
+            || archive_path
+                .file_name()
+                .is_some_and(|name| name.to_string_lossy().ends_with(".tar.xz"))
+        {
             let xz_decoder = XzDecoder::new(file);
             let mut archive = Archive::new(xz_decoder);
             for entry in archive.entries()? {
                 let _entry = entry?;
             }
-        } else { // Single .xz file
+        } else {
+            // Single .xz file
             let mut xz_decoder = XzDecoder::new(file);
             let mut buffer = Vec::new();
             xz_decoder.read_to_end(&mut buffer)?;

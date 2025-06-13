@@ -166,11 +166,9 @@ impl Format {
                     mime_type
                 )),
             },
-            None => {
-                Err(anyhow::anyhow!(
-                    "failed to determine mime type using tree_magic_mini (returned None)"
-                ))
-            }
+            None => Err(anyhow::anyhow!(
+                "failed to determine mime type using tree_magic_mini (returned None)"
+            )),
         }
     }
 

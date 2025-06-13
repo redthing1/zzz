@@ -42,7 +42,7 @@ impl CompressionFormat for SevenZFormat {
 
         // Set password encryption if provided
         if let Some(password) = &options.password {
-            use sevenz_rust::{SevenZMethod, AesEncoderOptions};
+            use sevenz_rust::{AesEncoderOptions, SevenZMethod};
             sz.set_content_methods(vec![
                 AesEncoderOptions::new(Password::from(password.as_str())).into(),
                 SevenZMethod::LZMA2.into(),
@@ -140,18 +140,31 @@ impl CompressionFormat for SevenZFormat {
             .password
             .as_ref()
             .map_or(Password::empty(), |p| Password::from(p.as_str()));
-        let mut sz = SevenZReader::open(archive_path, password)
-            .map_err(|e| {
-                // Check if this looks like a password-related error
-                let error_msg = format!("{}", e);
-                if error_msg.contains("MaybeBadPassword") || (options.password.is_some() && (error_msg.contains("password") || error_msg.contains("decrypt") || error_msg.contains("encrypted"))) {
-                    anyhow::anyhow!("Failed to decrypt archive (invalid password)")
-                } else if error_msg.contains("PasswordRequired") || (options.password.is_none() && (error_msg.contains("password") || error_msg.contains("AES") || error_msg.contains("encrypted"))) {
-                    anyhow::anyhow!("Archive is password protected but no password was provided")
-                } else {
-                    anyhow::anyhow!("Failed to open 7-Zip archive {}: {}", archive_path.display(), e)
-                }
-            })?;
+        let mut sz = SevenZReader::open(archive_path, password).map_err(|e| {
+            // Check if this looks like a password-related error
+            let error_msg = format!("{e}");
+            if error_msg.contains("MaybeBadPassword")
+                || (options.password.is_some()
+                    && (error_msg.contains("password")
+                        || error_msg.contains("decrypt")
+                        || error_msg.contains("encrypted")))
+            {
+                anyhow::anyhow!("Failed to decrypt archive (invalid password)")
+            } else if error_msg.contains("PasswordRequired")
+                || (options.password.is_none()
+                    && (error_msg.contains("password")
+                        || error_msg.contains("AES")
+                        || error_msg.contains("encrypted")))
+            {
+                anyhow::anyhow!("Archive is password protected but no password was provided")
+            } else {
+                anyhow::anyhow!(
+                    "Failed to open 7-Zip archive {}: {}",
+                    archive_path.display(),
+                    e
+                )
+            }
+        })?;
 
         std::fs::create_dir_all(output_dir).with_context(|| {
             format!("Failed to create output directory {}", output_dir.display())
@@ -233,11 +246,21 @@ impl CompressionFormat for SevenZFormat {
         let mut sz = sevenz_rust::SevenZReader::open(archive_path, sevenz_rust::Password::empty())
             .map_err(|e| {
                 // Provide consistent error messages for password-protected archives
-                let error_msg = format!("{}", e);
-                if error_msg.contains("PasswordRequired") || error_msg.contains("password") || error_msg.contains("encrypted") {
-                    anyhow::anyhow!("Failed to open 7-Zip archive {}: archive is password protected", archive_path.display())
+                let error_msg = format!("{e}");
+                if error_msg.contains("PasswordRequired")
+                    || error_msg.contains("password")
+                    || error_msg.contains("encrypted")
+                {
+                    anyhow::anyhow!(
+                        "Failed to open 7-Zip archive {}: archive is password protected",
+                        archive_path.display()
+                    )
                 } else {
-                    anyhow::anyhow!("Failed to open 7-Zip archive {}: {}", archive_path.display(), e)
+                    anyhow::anyhow!(
+                        "Failed to open 7-Zip archive {}: {}",
+                        archive_path.display(),
+                        e
+                    )
                 }
             })?;
         sz.for_each_entries(|_entry, _reader| Ok(true))?; // This iterates and reads entry headers

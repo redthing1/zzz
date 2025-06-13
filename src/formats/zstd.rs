@@ -1,15 +1,18 @@
 //! zstd compression format implementation
 
-use crate::encryption::{self, DecryptingReader, EncryptingWriter, DEFAULT_ENCRYPTION_CHUNK_SIZE, ENCRYPTED_ZSTD_MAGIC, ARGON2_SALT_LEN};
+use crate::encryption::{
+    self, DecryptingReader, EncryptingWriter, ARGON2_SALT_LEN, DEFAULT_ENCRYPTION_CHUNK_SIZE,
+    ENCRYPTED_ZSTD_MAGIC,
+};
 use crate::filter::FileFilter;
 use crate::formats::{
     ArchiveEntry, CompressionFormat, CompressionOptions, CompressionStats, ExtractionOptions,
 };
 use crate::progress::Progress;
 use crate::Result;
-use anyhow::{Context, anyhow, bail};
+use anyhow::{anyhow, bail, Context};
 use std::fs::File;
-use std::io::{self, Read, Write, Seek, SeekFrom};
+use std::io::{Read, Seek, SeekFrom, Write};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
@@ -131,57 +134,6 @@ impl ZstdFormat {
         Ok(files_to_add)
     }
 
-    /// Add a single file to the tar archive
-    fn add_file_to_archive(
-        tar_builder: &mut Builder<zstd::Encoder<'_, File>>,
-        file_path: &Path,
-        archive_path: &Path,
-        options: &CompressionOptions,
-        progress: Option<&Progress>,
-        bytes_processed: &mut u64,
-    ) -> Result<()> {
-        let mut file = File::open(file_path).with_context(|| {
-            format!("failed to open file for archiving: {}", file_path.display())
-        })?;
-        let metadata = file.metadata().with_context(|| {
-            format!("failed to read metadata for file: {}", file_path.display())
-        })?;
-
-        // create normalized tar header
-        let mut header = Self::create_file_header(&metadata, options)?;
-
-        // add to archive
-        tar_builder.append_data(&mut header, archive_path, &mut file)?;
-
-        // update progress
-        *bytes_processed += metadata.len();
-        if let Some(progress) = progress {
-            progress.update(*bytes_processed);
-        }
-
-        Ok(())
-    }
-
-    /// Add a directory to the tar archive
-    fn add_directory_to_archive(
-        tar_builder: &mut Builder<zstd::Encoder<'_, File>>,
-        dir_path: &Path,
-        archive_path: &Path,
-        options: &CompressionOptions,
-    ) -> Result<()> {
-        let metadata = dir_path.metadata()?;
-        let mut header = Self::create_dir_header(&metadata, options)?;
-
-        // ensure directory path ends with /
-        let mut dir_path_str = archive_path.to_string_lossy().to_string();
-        if !dir_path_str.ends_with('/') {
-            dir_path_str.push('/');
-        }
-
-        tar_builder.append_data(&mut header, dir_path_str.as_str(), io::empty())?;
-        Ok(())
-    }
-
     /// Helper function to add files to tar archive (works with any Writer type)
     fn add_files_to_tar<W: Write>(
         tar_builder: &mut Builder<W>,
@@ -199,7 +151,7 @@ impl ZstdFormat {
                 file_path
                     .file_name()
                     .map(std::path::Path::new)
-                    .unwrap_or(&file_path)
+                    .unwrap_or(file_path)
             });
 
             if file_path.is_file() {
@@ -253,7 +205,7 @@ impl CompressionFormat for ZstdFormat {
         // create output file
         let mut underlying_file = File::create(output_path)
             .with_context(|| format!("failed to create output file: {}", output_path.display()))?;
-        
+
         let mut key_material: Option<Vec<u8>> = None;
 
         // Handle password-based encryption
@@ -261,13 +213,15 @@ impl CompressionFormat for ZstdFormat {
             if !password.is_empty() {
                 let (derived_key, salt) = encryption::derive_key(password, None)
                     .context("Failed to derive encryption key for ZSTD compression")?;
-                
+
                 // Write magic header and salt
-                underlying_file.write_all(ENCRYPTED_ZSTD_MAGIC)
+                underlying_file
+                    .write_all(ENCRYPTED_ZSTD_MAGIC)
                     .context("Failed to write encryption magic header")?;
-                underlying_file.write_all(&salt)
+                underlying_file
+                    .write_all(&salt)
                     .context("Failed to write encryption salt")?;
-                
+
                 key_material = Some(derived_key);
             }
         }
@@ -289,20 +243,28 @@ impl CompressionFormat for ZstdFormat {
         // Handle encrypted vs unencrypted compression differently
         if let Some(key) = key_material {
             // Encrypted compression pipeline
-            let encrypting_writer = EncryptingWriter::new(underlying_file, &key, DEFAULT_ENCRYPTION_CHUNK_SIZE)
-                .context("Failed to create EncryptingWriter for ZSTD")?;
+            let encrypting_writer =
+                EncryptingWriter::new(underlying_file, &key, DEFAULT_ENCRYPTION_CHUNK_SIZE)
+                    .context("Failed to create EncryptingWriter for ZSTD")?;
             let mut zstd_encoder = zstd::Encoder::new(encrypting_writer, zstd_level)
                 .context("Failed to create ZSTD encoder for encrypted stream")?;
-            
+
             // Configure threading
             if thread_count > 1 {
                 let _ = zstd_encoder.set_parameter(CParameter::NbWorkers(thread_count));
             }
-            
+
             // Create tar builder and add files
             let mut tar_builder = Builder::new(zstd_encoder);
-            Self::add_files_to_tar(&mut tar_builder, input_path, &files_to_add, base_path, options, progress)?;
-            
+            Self::add_files_to_tar(
+                &mut tar_builder,
+                input_path,
+                &files_to_add,
+                base_path,
+                options,
+                progress,
+            )?;
+
             // Finish the tar and get the encoder back
             let encoder = tar_builder.into_inner()?;
             let _inner = encoder.finish()?; // This finishes the zstd encoder, the encrypting writer handles the file
@@ -310,16 +272,23 @@ impl CompressionFormat for ZstdFormat {
             // Standard unencrypted compression pipeline
             let mut zstd_encoder = zstd::Encoder::new(underlying_file, zstd_level)
                 .context("Failed to create ZSTD encoder for unencrypted stream")?;
-            
+
             // Configure threading
             if thread_count > 1 {
                 let _ = zstd_encoder.set_parameter(CParameter::NbWorkers(thread_count));
             }
-            
+
             // Create tar builder and add files
             let mut tar_builder = Builder::new(zstd_encoder);
-            Self::add_files_to_tar(&mut tar_builder, input_path, &files_to_add, base_path, options, progress)?;
-            
+            Self::add_files_to_tar(
+                &mut tar_builder,
+                input_path,
+                &files_to_add,
+                base_path,
+                options,
+                progress,
+            )?;
+
             // Finish the tar and get the encoder back
             let encoder = tar_builder.into_inner()?;
             let output_file = encoder.finish()?;
@@ -340,55 +309,71 @@ impl CompressionFormat for ZstdFormat {
         // open archive file
         let mut archive_file = File::open(archive_path)
             .with_context(|| format!("failed to open archive file: {}", archive_path.display()))?;
-        
+
         // Check for encryption magic header
         let mut magic_buffer = [0u8; ENCRYPTED_ZSTD_MAGIC.len()];
-        let bytes_read = archive_file.read(&mut magic_buffer)
+        let bytes_read = archive_file
+            .read(&mut magic_buffer)
             .context("Failed to read initial bytes from archive for encryption check")?;
 
         // Determine if this is an encrypted archive and set up the input stream
-        let input_stream: Box<dyn Read> = if bytes_read == ENCRYPTED_ZSTD_MAGIC.len() && magic_buffer == *ENCRYPTED_ZSTD_MAGIC {
+        let input_stream: Box<dyn Read> = if bytes_read == ENCRYPTED_ZSTD_MAGIC.len()
+            && magic_buffer == *ENCRYPTED_ZSTD_MAGIC
+        {
             // This is an encrypted archive
-            let password = options.password.as_deref().ok_or_else(||
-                anyhow!("Encrypted archive '{}' requires a password.", archive_path.display())
-            )?;
-            
+            let password = options.password.as_deref().ok_or_else(|| {
+                anyhow!(
+                    "Encrypted archive '{}' requires a password.",
+                    archive_path.display()
+                )
+            })?;
+
             if password.is_empty() {
-                bail!("Password cannot be empty for encrypted archive '{}'.", archive_path.display());
+                bail!(
+                    "Password cannot be empty for encrypted archive '{}'.",
+                    archive_path.display()
+                );
             }
-            
+
             // Read the salt
             let mut salt = vec![0u8; ARGON2_SALT_LEN];
-            archive_file.read_exact(&mut salt)
+            archive_file
+                .read_exact(&mut salt)
                 .context("Failed to read salt from encrypted archive")?;
-            
+
             // Derive the decryption key
             let (derived_key, _used_salt) = encryption::derive_key(password, Some(&salt))
                 .context("Failed to derive decryption key")?;
-            
+
             // Create decrypting reader
             let decrypting_reader = DecryptingReader::new(archive_file, &derived_key)
                 .context("Failed to create DecryptingReader for ZSTD")?;
-            
+
             Box::new(decrypting_reader)
         } else {
             // This is a standard (unencrypted) archive
-            archive_file.seek(SeekFrom::Start(0))
+            archive_file
+                .seek(SeekFrom::Start(0))
                 .context("Failed to rewind archive file for standard processing")?;
-            
-            if options.password.is_some() && !options.password.as_deref().unwrap_or_default().is_empty() {
+
+            if options.password.is_some()
+                && !options.password.as_deref().unwrap_or_default().is_empty()
+            {
                 eprintln!(
                     "warning: Password provided, but archive '{}' does not appear to be in the expected encrypted format. Attempting standard extraction.",
                     archive_path.display()
                 );
             }
-            
+
             Box::new(archive_file)
         };
 
         // create zstd decoder with the appropriate input stream
         let decoder = zstd::Decoder::new(input_stream).with_context(|| {
-            format!("failed to create zstd decoder for: {}", archive_path.display())
+            format!(
+                "failed to create zstd decoder for: {}",
+                archive_path.display()
+            )
         })?;
 
         // create tar archive reader
@@ -434,10 +419,11 @@ impl CompressionFormat for ZstdFormat {
         // open archive file
         let mut archive_file = File::open(archive_path)
             .with_context(|| format!("failed to open archive file: {}", archive_path.display()))?;
-        
+
         // Check for encryption magic header
         let mut magic_buffer = [0u8; ENCRYPTED_ZSTD_MAGIC.len()];
-        let bytes_read = archive_file.read(&mut magic_buffer)
+        let bytes_read = archive_file
+            .read(&mut magic_buffer)
             .context("Failed to read initial bytes from archive for encryption check")?;
 
         // If this is an encrypted archive, we can't list it without a password
@@ -449,7 +435,8 @@ impl CompressionFormat for ZstdFormat {
         }
 
         // This is a standard archive, proceed normally
-        archive_file.seek(SeekFrom::Start(0))
+        archive_file
+            .seek(SeekFrom::Start(0))
             .context("Failed to rewind archive file for standard processing")?;
 
         // create zstd decoder
@@ -489,31 +476,39 @@ impl CompressionFormat for ZstdFormat {
         // open archive file
         let mut archive_file = File::open(archive_path)
             .with_context(|| format!("failed to open archive file: {}", archive_path.display()))?;
-        
+
         // Check for encryption magic header
         let mut magic_buffer = [0u8; ENCRYPTED_ZSTD_MAGIC.len()];
-        let bytes_read = archive_file.read(&mut magic_buffer)
+        let bytes_read = archive_file
+            .read(&mut magic_buffer)
             .context("Failed to read initial bytes from archive for encryption check")?;
 
         // If this is an encrypted archive, we can only verify the header format
         if bytes_read == ENCRYPTED_ZSTD_MAGIC.len() && magic_buffer == *ENCRYPTED_ZSTD_MAGIC {
             // For encrypted archives, we can check if the salt is readable
             let mut salt = vec![0u8; ARGON2_SALT_LEN];
-            archive_file.read_exact(&mut salt)
+            archive_file
+                .read_exact(&mut salt)
                 .context("Failed to read salt from encrypted archive")?;
-            
+
             // If we got here, the header format is valid
             // Full integrity testing would require a password, but basic format is OK
             return Ok(());
         }
 
         // This is a standard archive, proceed with full integrity testing
-        archive_file.seek(SeekFrom::Start(0))
+        archive_file
+            .seek(SeekFrom::Start(0))
             .context("Failed to rewind archive file for standard processing")?;
 
         // Check if this is a tar.zst or single .zst file
-        if archive_path.extension().map_or(false, |ext| ext == "tzst" || ext == "tar.zst") ||
-           archive_path.file_name().map_or(false, |name| name.to_string_lossy().ends_with(".tar.zst")) {
+        if archive_path
+            .extension()
+            .is_some_and(|ext| ext == "tzst" || ext == "tar.zst")
+            || archive_path
+                .file_name()
+                .is_some_and(|name| name.to_string_lossy().ends_with(".tar.zst"))
+        {
             // This is a tar.zst archive - test by reading all tar entries
             let zstd_decoder = zstd::stream::read::Decoder::new(archive_file)?;
             let mut archive = tar::Archive::new(zstd_decoder);
@@ -526,7 +521,7 @@ impl CompressionFormat for ZstdFormat {
             let mut buffer = Vec::new();
             zstd_decoder.read_to_end(&mut buffer)?;
         }
-        
+
         Ok(())
     }
 }

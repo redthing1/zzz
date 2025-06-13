@@ -264,20 +264,24 @@ impl CompressionFormat for GzipFormat {
     fn test_integrity(archive_path: &Path) -> Result<()> {
         // For Gzip, try to read the whole stream to check for corruption.
         // If it's a .tgz (tar.gz), list contents using the tar crate.
+        use flate2::read::GzDecoder;
         use std::fs::File;
         use std::io::Read;
-        use flate2::read::GzDecoder;
         use tar::Archive;
 
         let file = File::open(archive_path)?;
-        if archive_path.extension().map_or(false, |ext| ext == "tgz") ||
-           archive_path.file_name().map_or(false, |name| name.to_string_lossy().ends_with(".tar.gz")) {
+        if archive_path.extension().is_some_and(|ext| ext == "tgz")
+            || archive_path
+                .file_name()
+                .is_some_and(|name| name.to_string_lossy().ends_with(".tar.gz"))
+        {
             let gz_decoder = GzDecoder::new(file);
             let mut archive = Archive::new(gz_decoder);
             for entry in archive.entries()? {
                 let _entry = entry?; // Access entry to check for errors
             }
-        } else { // Single .gz file
+        } else {
+            // Single .gz file
             let mut gz_decoder = GzDecoder::new(file);
             let mut buffer = Vec::new();
             gz_decoder.read_to_end(&mut buffer)?;

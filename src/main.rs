@@ -100,7 +100,7 @@ fn run(cli: Cli) -> zzz::Result<()> {
         Commands::Test { archive } => {
             // Detect format and test integrity
             let format = zzz::formats::Format::detect(&archive)?;
-            
+
             match format {
                 zzz::formats::Format::Zip => {
                     zzz::formats::zip::ZipFormat::test_integrity(&archive)?
@@ -111,14 +111,12 @@ fn run(cli: Cli) -> zzz::Result<()> {
                 zzz::formats::Format::Gzip => {
                     zzz::formats::gz::GzipFormat::test_integrity(&archive)?
                 }
-                zzz::formats::Format::Xz => {
-                    zzz::formats::xz::XzFormat::test_integrity(&archive)?
-                }
+                zzz::formats::Format::Xz => zzz::formats::xz::XzFormat::test_integrity(&archive)?,
                 zzz::formats::Format::Zstd => {
                     zzz::formats::zstd::ZstdFormat::test_integrity(&archive)?
                 }
             }
-            
+
             println!("{} integrity: OK", archive.display());
         }
     }

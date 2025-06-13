@@ -58,8 +58,8 @@ impl CompressionFormat for ZipFormat {
             if options.password.is_some() {
                 return Err(anyhow::anyhow!("Password protection is not supported for ZIP format. Use 7z format for password protection."));
             }
-            
-            let current_file_options = base_file_options.clone();
+
+            let current_file_options = base_file_options;
 
             let filename = input_path
                 .file_name()
@@ -81,7 +81,7 @@ impl CompressionFormat for ZipFormat {
             if options.password.is_some() {
                 return Err(anyhow::anyhow!("Password protection is not supported for ZIP format. Use 7z format for password protection."));
             }
-            
+
             let base_path = input_path.parent().unwrap_or(input_path);
             let mut entries: Vec<_> = WalkDir::new(input_path)
                 .into_iter()
@@ -101,7 +101,7 @@ impl CompressionFormat for ZipFormat {
                 let relative_path = path.strip_prefix(base_path)?;
                 let path_str = relative_path.to_string_lossy();
 
-                let current_file_options = base_file_options.clone();
+                let current_file_options = base_file_options;
 
                 if path.is_file() {
                     zip_writer.start_file(path_str.as_ref(), current_file_options)?;
@@ -136,7 +136,7 @@ impl CompressionFormat for ZipFormat {
         if options.password.is_some() {
             return Err(anyhow::anyhow!("Password protection is not supported for ZIP format. Use 7z format for password protection."));
         }
-        
+
         let file = File::open(archive_path)
             .with_context(|| format!("Failed to open archive file {}", archive_path.display()))?;
         let buf_reader = BufReader::new(file);
@@ -219,8 +219,8 @@ impl CompressionFormat for ZipFormat {
 
     fn test_integrity(archive_path: &Path) -> Result<()> {
         use std::fs::File;
-        use zip::ZipArchive;
         use std::io::Read;
+        use zip::ZipArchive;
 
         let file = File::open(archive_path)?;
         let mut archive = ZipArchive::new(file)?;
@@ -231,7 +231,7 @@ impl CompressionFormat for ZipFormat {
             // To be more thorough, we could try reading from the entry:
             if entry.is_file() {
                 let mut buffer = [0; 1]; // Read 1 byte
-                entry.read(&mut buffer).ok(); // Ignore errors for now, or handle them
+                let _ = entry.read(&mut buffer); // Ignore read amount and errors for now
             }
         }
         Ok(())
