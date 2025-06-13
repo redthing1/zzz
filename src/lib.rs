@@ -5,6 +5,7 @@
 
 pub mod cli;
 pub mod compress;
+pub mod encryption;
 pub mod error;
 pub mod extract;
 pub mod filter;

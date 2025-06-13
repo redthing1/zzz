@@ -55,7 +55,7 @@ pub enum Commands {
         /// input file or directory
         input: PathBuf,
 
-        /// password for encryption (only supported by zip and 7z)
+        /// password for encryption (supported by zst and 7z)
         #[arg(long)]
         password: Option<String>,
     },
@@ -77,7 +77,7 @@ pub enum Commands {
         #[arg(long)]
         overwrite: bool,
 
-        /// password for decryption (for zip and 7z)
+        /// password for decryption (for zst and 7z)
         #[arg(long)]
         password: Option<String>,
     },
