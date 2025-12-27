@@ -77,6 +77,41 @@ fn test_compress_single_file() -> Result<()> {
 }
 
 #[test]
+fn test_compress_single_file_excluded() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+    let source_file = temp_dir.path().join("skip.tmp");
+    fs::write(&source_file, "excluded content")?;
+
+    let cases = [
+        ("zst", "skip.zst"),
+        ("zip", "skip.zip"),
+        ("7z", "skip.7z"),
+        ("gz", "skip.tgz"),
+        ("xz", "skip.txz"),
+    ];
+
+    for (format, filename) in cases {
+        let output_file = temp_dir.path().join(filename);
+
+        zzz_cmd()
+            .args(["compress", "--exclude", "*.tmp", "-f", format, "-o"])
+            .arg(&output_file)
+            .arg(&source_file)
+            .assert()
+            .success();
+
+        zzz_cmd()
+            .args(["list"])
+            .arg(&output_file)
+            .assert()
+            .success()
+            .stdout(predicate::str::is_empty());
+    }
+
+    Ok(())
+}
+
+#[test]
 fn test_compress_with_short_alias() -> Result<()> {
     let temp_dir = TempDir::new()?;
     let source_file = temp_dir.path().join("test.txt");

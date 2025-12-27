@@ -7,6 +7,7 @@ use std::path::Path;
 pub mod gz;
 pub mod rar;
 pub mod sevenz;
+pub mod tarball;
 pub mod xz;
 pub mod zip;
 pub mod zstd;
@@ -45,8 +46,8 @@ pub struct ArchiveEntry {
 pub struct CompressionOptions {
     pub level: i32,                  // 1-22, default 19
     pub threads: u32,                // 0 = auto-detect CPU cores
-    pub normalize_permissions: bool, // security: normalize ownership
-    pub strip_xattrs: bool,          // security: remove extended attributes
+    pub normalize_permissions: bool, // security: normalize permissions/ownership
+    pub strip_xattrs: bool,          // security: strip extended attributes (xattrs)
     pub deterministic: bool,         // sort files for reproducible archives
     pub password: Option<String>,
 }
@@ -65,11 +66,23 @@ impl Default for CompressionOptions {
 }
 
 /// extraction options for extracting archives
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ExtractionOptions {
     pub overwrite: bool,
     pub strip_components: usize,
+    pub strip_xattrs: bool,
     pub password: Option<String>,
+}
+
+impl Default for ExtractionOptions {
+    fn default() -> Self {
+        Self {
+            overwrite: false,
+            strip_components: 0,
+            strip_xattrs: true,
+            password: None,
+        }
+    }
 }
 
 /// Supported compression formats

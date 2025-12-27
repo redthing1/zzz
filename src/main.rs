@@ -27,6 +27,7 @@ fn run(cli: Cli) -> zzz_arc::Result<()> {
             level,
             progress,
             exclude,
+            keep_xattrs,
             no_default_excludes,
             format,
             password,
@@ -49,6 +50,7 @@ fn run(cli: Cli) -> zzz_arc::Result<()> {
                 level,
                 threads: cli.threads,
                 password,
+                strip_xattrs: !keep_xattrs,
                 ..Default::default()
             };
 
@@ -80,6 +82,7 @@ fn run(cli: Cli) -> zzz_arc::Result<()> {
             destination,
             directory,
             strip_components,
+            keep_xattrs,
             overwrite,
             password,
         } => {
@@ -88,6 +91,7 @@ fn run(cli: Cli) -> zzz_arc::Result<()> {
             let options = ExtractionOptions {
                 overwrite,
                 strip_components,
+                strip_xattrs: !keep_xattrs,
                 password,
             };
 

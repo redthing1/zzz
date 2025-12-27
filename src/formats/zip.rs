@@ -9,12 +9,13 @@ use crate::{
     utils, Result,
 };
 use anyhow::Context;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::{
     fs::File,
     io::{BufReader, BufWriter},
     path::Path,
 };
-use walkdir::WalkDir;
 use zip::{write::FileOptions, CompressionMethod, ZipArchive, ZipWriter};
 
 pub struct ZipFormat;
@@ -27,15 +28,7 @@ impl CompressionFormat for ZipFormat {
         filter: &FileFilter,
         progress: Option<&Progress>,
     ) -> Result<CompressionStats> {
-        let input_size = if input_path.is_file() {
-            std::fs::metadata(input_path)
-                .with_context(|| {
-                    format!("Failed to read metadata for input {}", input_path.display())
-                })?
-                .len()
-        } else {
-            utils::calculate_directory_size(input_path, filter)?
-        };
+        let input_size = utils::calculate_directory_size(input_path, filter)?;
 
         let output_file = File::create(output_path)
             .with_context(|| format!("Failed to create output file {}", output_path.display()))?;
@@ -59,17 +52,44 @@ impl CompressionFormat for ZipFormat {
                 return Err(anyhow::anyhow!("Password protection is not supported for ZIP format. Use 7z format for password protection."));
             }
 
-            let current_file_options = base_file_options;
+            let metadata = std::fs::metadata(input_path).with_context(|| {
+                format!(
+                    "Failed to read metadata for input file {}",
+                    input_path.display()
+                )
+            })?;
+            let permissions = if options.normalize_permissions {
+                0o644
+            } else {
+                #[cfg(unix)]
+                {
+                    metadata.permissions().mode()
+                }
+                #[cfg(not(unix))]
+                {
+                    0o644
+                }
+            };
+            let current_file_options = base_file_options.unix_permissions(permissions);
 
-            let filename = input_path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "Could not determine filename from input path: {}",
-                        input_path.display()
-                    )
-                })?;
+            let filename_os = input_path.file_name().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Could not determine filename from input path: {}",
+                    input_path.display()
+                )
+            })?;
+            if !filter.should_include_relative(Path::new(filename_os)) {
+                zip_writer.finish()?;
+                let output_size = std::fs::metadata(output_path)?.len();
+                return Ok(CompressionStats::new(input_size, output_size));
+            }
+
+            let filename = filename_os.to_str().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Could not determine filename from input path: {}",
+                    input_path.display()
+                )
+            })?;
             zip_writer.start_file(filename, current_file_options)?;
 
             let mut file = File::open(input_path)
@@ -83,11 +103,9 @@ impl CompressionFormat for ZipFormat {
             }
 
             let base_path = input_path.parent().unwrap_or(input_path);
-            let mut entries: Vec<_> = WalkDir::new(input_path)
-                .follow_links(false)
-                .into_iter()
-                .filter_entry(|entry| filter.should_include_path(input_path, entry.path()))
-                .filter_map(|e| e.ok())
+            let mut entries: Vec<_> = filter
+                .walk_entries(input_path)
+                .filter_map(|entry| entry.ok())
                 .collect();
 
             // Sort for deterministic archives
@@ -102,7 +120,20 @@ impl CompressionFormat for ZipFormat {
                 let relative_path = path.strip_prefix(base_path)?;
                 let path_str = relative_path.to_string_lossy();
 
-                let current_file_options = base_file_options;
+                let metadata = entry.metadata()?;
+                let permissions = if options.normalize_permissions {
+                    0o644
+                } else {
+                    #[cfg(unix)]
+                    {
+                        metadata.permissions().mode()
+                    }
+                    #[cfg(not(unix))]
+                    {
+                        0o644
+                    }
+                };
+                let current_file_options = base_file_options.unix_permissions(permissions);
 
                 if path.is_file() {
                     zip_writer.start_file(path_str.as_ref(), current_file_options)?;
@@ -112,13 +143,26 @@ impl CompressionFormat for ZipFormat {
                     })?;
                     std::io::copy(&mut file, &mut zip_writer)?;
 
-                    let metadata = entry.metadata()?;
                     processed_size += metadata.len();
 
                     if let Some(progress) = progress {
                         progress.set_position(processed_size);
                     }
                 } else if path.is_dir() {
+                    let permissions = if options.normalize_permissions {
+                        0o755
+                    } else {
+                        #[cfg(unix)]
+                        {
+                            metadata.permissions().mode()
+                        }
+                        #[cfg(not(unix))]
+                        {
+                            0o755
+                        }
+                    };
+                    let current_file_options = base_file_options.unix_permissions(permissions);
+
                     // Add directory entry with trailing slash
                     let dir_path = format!("{path_str}/");
                     zip_writer.add_directory(&dir_path, current_file_options)?;
@@ -160,19 +204,16 @@ impl CompressionFormat for ZipFormat {
         for i in 0..archive.len() {
             let mut file = archive.by_index(i)?;
             let file_path = std::path::Path::new(file.name());
-            let relative_path =
-                crate::utils::sanitize_archive_entry_path(file_path, options.strip_components)?;
-            let Some(relative_path) = relative_path else {
+            let Some(target_path) = crate::utils::extract_entry_to_path(
+                output_dir,
+                file_path,
+                options.strip_components,
+                options.overwrite,
+                file.is_dir(),
+            )?
+            else {
                 continue;
             };
-            let target_path = output_dir.join(&relative_path);
-
-            crate::utils::ensure_no_symlink_ancestors(output_dir, &target_path)?;
-
-            // Check for overwrites
-            if target_path.exists() && !options.overwrite {
-                continue;
-            }
 
             // Show verbose output for individual files
             if let Some(progress) = progress {

@@ -30,25 +30,30 @@ impl CompressionFormat for RarFormat {
     ) -> Result<()> {
         use unrar::Archive;
 
-        let mut archive = Archive::new(archive_path.to_str().unwrap()).open_for_processing()?;
+        let archive_path_str = archive_path.to_str().ok_or_else(|| {
+            anyhow::anyhow!(
+                "RAR archive path is not valid UTF-8: {}",
+                archive_path.display()
+            )
+        })?;
+        let mut archive = Archive::new(archive_path_str).open_for_processing()?;
 
         let mut entry_count = 0u64;
         while let Some(header) = archive.read_header()? {
             let entry = header.entry();
 
-            let relative_path = crate::utils::sanitize_archive_entry_path(
-                entry.filename.as_path(),
-                options.strip_components,
-            )?;
-            let Some(relative_path) = relative_path else {
-                archive = header.skip()?;
-                continue;
-            };
-
             if entry.is_file() {
-                let output_path = output_dir.join(&relative_path);
-
-                crate::utils::ensure_no_symlink_ancestors(output_dir, &output_path)?;
+                let output_path = crate::utils::extract_entry_to_path(
+                    output_dir,
+                    entry.filename.as_path(),
+                    options.strip_components,
+                    options.overwrite,
+                    false,
+                )?;
+                let Some(output_path) = output_path else {
+                    archive = header.skip()?;
+                    continue;
+                };
 
                 if let Some(parent) = output_path.parent() {
                     std::fs::create_dir_all(parent)?;
@@ -73,7 +78,13 @@ impl CompressionFormat for RarFormat {
         use unrar::Archive;
 
         let mut entries = Vec::new();
-        let mut archive = Archive::new(archive_path.to_str().unwrap()).open_for_listing()?;
+        let archive_path_str = archive_path.to_str().ok_or_else(|| {
+            anyhow::anyhow!(
+                "RAR archive path is not valid UTF-8: {}",
+                archive_path.display()
+            )
+        })?;
+        let mut archive = Archive::new(archive_path_str).open_for_listing()?;
 
         while let Some(header) = archive.read_header()? {
             let entry = header.entry();
@@ -95,7 +106,13 @@ impl CompressionFormat for RarFormat {
     fn test_integrity(archive_path: &Path) -> Result<()> {
         use unrar::Archive;
 
-        let mut archive = Archive::new(archive_path.to_str().unwrap()).open_for_processing()?;
+        let archive_path_str = archive_path.to_str().ok_or_else(|| {
+            anyhow::anyhow!(
+                "RAR archive path is not valid UTF-8: {}",
+                archive_path.display()
+            )
+        })?;
+        let mut archive = Archive::new(archive_path_str).open_for_processing()?;
 
         while let Some(header) = archive.read_header()? {
             archive = header.test()?;

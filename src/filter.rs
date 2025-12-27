@@ -4,6 +4,7 @@ use crate::Result;
 use glob::Pattern;
 use once_cell::sync::Lazy;
 use std::path::Path;
+use walkdir::WalkDir;
 
 /// comprehensive list of garbage files to exclude by default
 pub const GARBAGE_FILES: &[&str] = &[
@@ -204,6 +205,17 @@ impl FileFilter {
     /// check if a path should be included, based on its relative path to a root
     pub fn should_include_path(&self, root: &Path, path: &Path) -> bool {
         !self.should_exclude_path(root, path)
+    }
+
+    /// walk a directory tree while applying filter pruning
+    pub fn walk_entries<'a>(
+        &'a self,
+        root: &'a Path,
+    ) -> impl Iterator<Item = walkdir::Result<walkdir::DirEntry>> + 'a {
+        WalkDir::new(root)
+            .follow_links(false)
+            .into_iter()
+            .filter_entry(move |entry| self.should_include_path(root, entry.path()))
     }
 }
 

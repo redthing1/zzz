@@ -11,7 +11,6 @@ use crate::{
 use anyhow::Context;
 use sevenz_rust::{Password, SevenZArchiveEntry, SevenZReader, SevenZWriter};
 use std::{fs::File, path::Path};
-use walkdir::WalkDir;
 
 pub struct SevenZFormat;
 
@@ -23,15 +22,7 @@ impl CompressionFormat for SevenZFormat {
         filter: &FileFilter,
         progress: Option<&Progress>,
     ) -> Result<CompressionStats> {
-        let input_size = if input_path.is_file() {
-            std::fs::metadata(input_path)
-                .with_context(|| {
-                    format!("Failed to read metadata for input {}", input_path.display())
-                })?
-                .len()
-        } else {
-            utils::calculate_directory_size(input_path, filter)?
-        };
+        let input_size = utils::calculate_directory_size(input_path, filter)?;
 
         let mut sz = SevenZWriter::create(output_path).with_context(|| {
             format!(
@@ -55,15 +46,33 @@ impl CompressionFormat for SevenZFormat {
 
         if input_path.is_file() {
             // Single file compression
-            let filename = input_path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "Could not determine filename from input path: {}",
-                        input_path.display()
-                    )
+            let filename_os = input_path.file_name().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Could not determine filename from input path: {}",
+                    input_path.display()
+                )
+            })?;
+            if !filter.should_include_relative(Path::new(filename_os)) {
+                sz.finish().with_context(|| {
+                    format!("Failed to finalize 7-Zip archive {}", output_path.display())
                 })?;
+                let output_size = std::fs::metadata(output_path)
+                    .with_context(|| {
+                        format!(
+                            "Failed to read metadata for output file {}",
+                            output_path.display()
+                        )
+                    })?
+                    .len();
+                return Ok(CompressionStats::new(input_size, output_size));
+            }
+
+            let filename = filename_os.to_str().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Could not determine filename from input path: {}",
+                    input_path.display()
+                )
+            })?;
 
             let entry = SevenZArchiveEntry::from_path(input_path, filename.to_string());
             sz.push_archive_entry(
@@ -75,11 +84,9 @@ impl CompressionFormat for SevenZFormat {
         } else {
             // Directory compression - preserve directory structure like our other formats
             let base_path = input_path.parent().unwrap_or(input_path);
-            let mut entries: Vec<_> = WalkDir::new(input_path)
-                .follow_links(false)
-                .into_iter()
-                .filter_entry(|entry| filter.should_include_path(input_path, entry.path()))
-                .filter_map(|e| e.ok())
+            let mut entries: Vec<_> = filter
+                .walk_entries(input_path)
+                .filter_map(|entry| entry.ok())
                 .collect();
 
             // Sort for deterministic archives
@@ -185,23 +192,17 @@ impl CompressionFormat for SevenZFormat {
         let mut processed_count = 0;
         sz.for_each_entries(|entry, reader| {
             let file_path = std::path::Path::new(&entry.name);
-            let relative_path =
-                crate::utils::sanitize_archive_entry_path(file_path, options.strip_components)
-                    .map_err(|e| {
-                        std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string())
-                    })?;
-            let Some(relative_path) = relative_path else {
+            let target_path = crate::utils::extract_entry_to_path(
+                output_dir,
+                file_path,
+                options.strip_components,
+                options.overwrite,
+                entry.is_directory(),
+            )
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+            let Some(target_path) = target_path else {
                 return Ok(true);
             };
-            let target_path = output_dir.join(&relative_path);
-
-            crate::utils::ensure_no_symlink_ancestors(output_dir, &target_path)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
-
-            // Check for overwrites
-            if target_path.exists() && !options.overwrite {
-                return Ok(true);
-            }
 
             // Show verbose output for individual files
             if let Some(progress) = progress {

@@ -70,6 +70,63 @@ pub fn ensure_no_symlink_ancestors(root: &Path, target: &Path) -> Result<()> {
     Ok(())
 }
 
+/// prepare a safe output path for extracting an archive entry
+pub fn extract_entry_to_path(
+    output_dir: &Path,
+    entry_path: &Path,
+    strip_components: usize,
+    overwrite: bool,
+    entry_is_dir: bool,
+) -> Result<Option<std::path::PathBuf>> {
+    match prepare_extract_target(
+        output_dir,
+        entry_path,
+        strip_components,
+        overwrite,
+        entry_is_dir,
+    )? {
+        ExtractTarget::Target(path) => Ok(Some(path)),
+        ExtractTarget::SkipStrip => Ok(None),
+        ExtractTarget::SkipExisting(path) => Err(anyhow::anyhow!(
+            "output file '{}' already exists. Use --overwrite to replace.",
+            path.display()
+        )),
+    }
+}
+
+/// extraction target resolution outcomes
+pub enum ExtractTarget {
+    SkipStrip,
+    SkipExisting(std::path::PathBuf),
+    Target(std::path::PathBuf),
+}
+
+/// prepare a safe extraction target path with skip reasons
+pub fn prepare_extract_target(
+    output_dir: &Path,
+    entry_path: &Path,
+    strip_components: usize,
+    overwrite: bool,
+    entry_is_dir: bool,
+) -> Result<ExtractTarget> {
+    let relative_path = sanitize_archive_entry_path(entry_path, strip_components)?;
+    let Some(relative_path) = relative_path else {
+        return Ok(ExtractTarget::SkipStrip);
+    };
+    let target_path = output_dir.join(relative_path);
+
+    ensure_no_symlink_ancestors(output_dir, &target_path)?;
+
+    if target_path.exists() && !overwrite {
+        if entry_is_dir && target_path.is_dir() {
+            return Ok(ExtractTarget::Target(target_path));
+        }
+        return Ok(ExtractTarget::SkipExisting(target_path));
+    }
+
+    Ok(ExtractTarget::Target(target_path))
+}
+
 /// calculate total size of a directory recursively
 pub fn calculate_dir_size(path: &Path) -> Result<u64> {
     let mut total = 0;
@@ -101,12 +158,7 @@ pub fn calculate_directory_size(path: &Path, filter: &crate::filter::FileFilter)
         return Ok(path.metadata()?.len());
     }
 
-    let walker = walkdir::WalkDir::new(path)
-        .follow_links(false)
-        .into_iter()
-        .filter_entry(|entry| filter.should_include_path(path, entry.path()));
-
-    for entry in walker {
+    for entry in filter.walk_entries(path) {
         let entry = entry?;
         if entry.file_type().is_file() {
             total += entry.metadata()?.len();
@@ -197,6 +249,44 @@ mod tests {
 
         let total_size = calculate_dir_size(temp_dir.path())?;
         assert_eq!(total_size, 14); // 5 + 6 + 3 = 14 bytes
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_prepare_extract_target_allows_existing_dir() -> Result<()> {
+        let temp_dir = TempDir::new()?;
+        let output_dir = temp_dir.path().join("out");
+        fs::create_dir(&output_dir)?;
+
+        let existing_dir = output_dir.join("existing");
+        fs::create_dir(&existing_dir)?;
+
+        let result = prepare_extract_target(&output_dir, Path::new("existing"), 0, false, true)?;
+
+        match result {
+            ExtractTarget::Target(path) => assert_eq!(path, existing_dir),
+            _ => anyhow::bail!("expected target for existing directory"),
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_prepare_extract_target_rejects_existing_file() -> Result<()> {
+        let temp_dir = TempDir::new()?;
+        let output_dir = temp_dir.path().join("out");
+        fs::create_dir(&output_dir)?;
+
+        let existing_file = output_dir.join("file.txt");
+        fs::write(&existing_file, "data")?;
+
+        let result = prepare_extract_target(&output_dir, Path::new("file.txt"), 0, false, false)?;
+
+        match result {
+            ExtractTarget::SkipExisting(path) => assert_eq!(path, existing_file),
+            _ => anyhow::bail!("expected skip existing for file"),
+        }
 
         Ok(())
     }

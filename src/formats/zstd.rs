@@ -6,219 +6,18 @@ use crate::encryption::{
 };
 use crate::filter::FileFilter;
 use crate::formats::{
-    ArchiveEntry, CompressionFormat, CompressionOptions, CompressionStats, ExtractionOptions,
+    tarball, ArchiveEntry, CompressionFormat, CompressionOptions, CompressionStats,
+    ExtractionOptions,
 };
 use crate::progress::Progress;
 use crate::Result;
 use anyhow::{anyhow, bail, Context};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
-use tar::Builder;
-use walkdir::WalkDir;
 use zstd::stream::raw::CParameter;
 
-// File permission constants for security normalization
-const NORMALIZED_FILE_MODE: u32 = 0o644;
-const NORMALIZED_DIR_MODE: u32 = 0o755;
-
 pub struct ZstdFormat;
-
-impl ZstdFormat {
-    /// Create and configure a normalized tar header for files
-    fn create_file_header(
-        metadata: &std::fs::Metadata,
-        options: &CompressionOptions,
-    ) -> Result<tar::Header> {
-        let mut header = tar::Header::new_gnu();
-        header.set_size(metadata.len());
-        header.set_mode(if options.normalize_permissions {
-            NORMALIZED_FILE_MODE
-        } else {
-            #[cfg(unix)]
-            {
-                metadata.permissions().mode()
-            }
-            #[cfg(not(unix))]
-            {
-                NORMALIZED_FILE_MODE
-            }
-        });
-
-        Self::apply_header_normalization(&mut header, metadata, options)?;
-        header.set_cksum();
-        Ok(header)
-    }
-
-    /// Create and configure a normalized tar header for directories
-    fn create_dir_header(
-        metadata: &std::fs::Metadata,
-        options: &CompressionOptions,
-    ) -> Result<tar::Header> {
-        let mut header = tar::Header::new_gnu();
-        header.set_entry_type(tar::EntryType::Directory);
-        header.set_size(0);
-        header.set_mode(if options.normalize_permissions {
-            NORMALIZED_DIR_MODE
-        } else {
-            #[cfg(unix)]
-            {
-                metadata.permissions().mode()
-            }
-            #[cfg(not(unix))]
-            {
-                NORMALIZED_DIR_MODE
-            }
-        });
-
-        Self::apply_header_normalization(&mut header, metadata, options)?;
-        header.set_cksum();
-        Ok(header)
-    }
-
-    /// Apply common header normalization (ownership, timestamps)
-    fn apply_header_normalization(
-        header: &mut tar::Header,
-        metadata: &std::fs::Metadata,
-        options: &CompressionOptions,
-    ) -> Result<()> {
-        // Set normalized ownership if requested
-        if options.normalize_permissions {
-            header.set_uid(0);
-            header.set_gid(0);
-            header.set_username("")?;
-            header.set_groupname("")?;
-        }
-
-        // Set modification time
-        if let Ok(mtime) = metadata.modified() {
-            if let Ok(duration) = mtime.duration_since(std::time::UNIX_EPOCH) {
-                header.set_mtime(duration.as_secs());
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Collect files to be added to archive, applying filtering
-    fn collect_files_to_add(
-        input_path: &Path,
-        filter: &FileFilter,
-        options: &CompressionOptions,
-    ) -> Result<Vec<std::path::PathBuf>> {
-        let mut files_to_add = Vec::new();
-
-        if input_path.is_file() {
-            // single file
-            if let Some(filename) = input_path.file_name() {
-                if filter.should_include_relative(Path::new(filename)) {
-                    files_to_add.push(input_path.to_path_buf());
-                }
-            } else {
-                files_to_add.push(input_path.to_path_buf());
-            }
-        } else {
-            // directory - walk and filter
-            let walker = WalkDir::new(input_path).follow_links(false);
-            let walker = if options.deterministic {
-                walker.sort_by(|a, b| a.path().cmp(b.path()))
-            } else {
-                walker
-            };
-
-            for entry in walker
-                .into_iter()
-                .filter_entry(|entry| filter.should_include_path(input_path, entry.path()))
-            {
-                let entry = entry?;
-                let path = entry.path();
-
-                // apply filtering
-                if filter.should_include_path(input_path, path) {
-                    files_to_add.push(path.to_path_buf());
-                }
-            }
-        }
-
-        Ok(files_to_add)
-    }
-
-    /// Helper function to add files to tar archive (works with any Writer type)
-    fn add_files_to_tar<W: Write>(
-        tar_builder: &mut Builder<W>,
-        input_path: &Path,
-        files_to_add: &[std::path::PathBuf],
-        options: &CompressionOptions,
-        progress: Option<&Progress>,
-    ) -> Result<()> {
-        let mut bytes_processed = 0u64;
-        let root_name = if input_path.is_dir() {
-            input_path.file_name()
-        } else {
-            None
-        };
-
-        for file_path in files_to_add {
-            // calculate relative path for archive
-            let archive_path = if input_path.is_file() {
-                file_path
-                    .file_name()
-                    .map(std::path::Path::new)
-                    .unwrap_or(file_path)
-                    .to_path_buf()
-            } else {
-                let relative = file_path.strip_prefix(input_path).unwrap_or(file_path);
-                let mut combined = std::path::PathBuf::new();
-                if let Some(root) = root_name {
-                    combined.push(root);
-                }
-                if !relative.as_os_str().is_empty() {
-                    combined.push(relative);
-                }
-                combined
-            };
-
-            if file_path.is_file() {
-                let mut file = File::open(file_path).with_context(|| {
-                    format!("failed to open file for archiving: {}", file_path.display())
-                })?;
-                let metadata = file.metadata().with_context(|| {
-                    format!("failed to read metadata for file: {}", file_path.display())
-                })?;
-
-                // create normalized tar header
-                let mut header = Self::create_file_header(&metadata, options)?;
-
-                // add to archive
-                tar_builder.append_data(&mut header, &archive_path, &mut file)?;
-
-                // update progress
-                bytes_processed += metadata.len();
-                if let Some(progress) = progress {
-                    progress.update(bytes_processed);
-                }
-            } else if file_path.is_dir() {
-                if archive_path.as_os_str().is_empty() {
-                    continue;
-                }
-                let metadata = file_path.metadata()?;
-                let mut header = Self::create_dir_header(&metadata, options)?;
-
-                // ensure directory path ends with /
-                let mut dir_path_str = archive_path.to_string_lossy().to_string();
-                if !dir_path_str.ends_with('/') {
-                    dir_path_str.push('/');
-                }
-
-                tar_builder.append_data(&mut header, dir_path_str.as_str(), std::io::empty())?;
-            }
-        }
-
-        Ok(())
-    }
-}
 
 impl CompressionFormat for ZstdFormat {
     fn compress(
@@ -263,8 +62,12 @@ impl CompressionFormat for ZstdFormat {
             options.threads
         };
 
-        // collect all files to add (with filtering)
-        let files_to_add = Self::collect_files_to_add(input_path, filter, options)?;
+        let build_options = tarball::BuildOptions {
+            normalize_ownership: options.normalize_permissions,
+            apply_filter_to_single_file: true,
+            directory_slash: true,
+            set_mtime_for_single_file: true,
+        };
 
         // Handle encrypted vs unencrypted compression differently
         if let Some(key) = key_material {
@@ -280,19 +83,15 @@ impl CompressionFormat for ZstdFormat {
                 let _ = zstd_encoder.set_parameter(CParameter::NbWorkers(thread_count));
             }
 
-            // Create tar builder and add files
-            let mut tar_builder = Builder::new(zstd_encoder);
-            Self::add_files_to_tar(
-                &mut tar_builder,
+            let zstd_encoder = tarball::build_tarball(
+                zstd_encoder,
                 input_path,
-                &files_to_add,
                 options,
+                filter,
                 progress,
+                build_options,
             )?;
-
-            // Finish the tar and get the encoder back
-            let encoder = tar_builder.into_inner()?;
-            let _inner = encoder.finish()?; // This finishes the zstd encoder, the encrypting writer handles the file
+            let _inner = zstd_encoder.finish()?;
         } else {
             // Standard unencrypted compression pipeline
             let mut zstd_encoder = zstd::Encoder::new(underlying_file, zstd_level)
@@ -303,19 +102,15 @@ impl CompressionFormat for ZstdFormat {
                 let _ = zstd_encoder.set_parameter(CParameter::NbWorkers(thread_count));
             }
 
-            // Create tar builder and add files
-            let mut tar_builder = Builder::new(zstd_encoder);
-            Self::add_files_to_tar(
-                &mut tar_builder,
+            let zstd_encoder = tarball::build_tarball(
+                zstd_encoder,
                 input_path,
-                &files_to_add,
                 options,
+                filter,
                 progress,
+                build_options,
             )?;
-
-            // Finish the tar and get the encoder back
-            let encoder = tar_builder.into_inner()?;
-            let output_file = encoder.finish()?;
+            let output_file = zstd_encoder.finish()?;
             let _ = output_file; // The file is already written
         }
 
@@ -405,60 +200,7 @@ impl CompressionFormat for ZstdFormat {
             )
         })?;
 
-        // create tar archive reader
-        let mut archive = tar::Archive::new(decoder);
-
-        // extract with safety checks
-        let mut entry_count = 0u64;
-        for entry_result in archive.entries()? {
-            let mut entry = entry_result?;
-            let entry_path = entry.path()?;
-            let relative_path =
-                crate::utils::sanitize_archive_entry_path(&entry_path, options.strip_components)?;
-            let Some(relative_path) = relative_path else {
-                continue;
-            };
-
-            // calculate output path
-            let output_path = output_dir.join(&relative_path);
-
-            crate::utils::ensure_no_symlink_ancestors(output_dir, &output_path)?;
-
-            // check for overwrite
-            if output_path.exists() && !options.overwrite {
-                anyhow::bail!(
-                    "file already exists: {} (use --overwrite to force)",
-                    output_path.display()
-                );
-            }
-
-            // Show verbose output for individual files
-            if let Some(progress) = progress {
-                if progress.is_verbose() {
-                    if entry.header().entry_type().is_dir() {
-                        println!("  creating: {}", entry_path.display());
-                    } else {
-                        println!("  extracting: {}", entry_path.display());
-                    }
-                }
-            }
-
-            // ensure parent directory exists
-            if let Some(parent) = output_path.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-
-            // extract the entry
-            entry.unpack(&output_path)?;
-
-            // Update progress
-            entry_count += 1;
-            if let Some(progress) = progress {
-                progress.set_position(entry_count);
-            }
-        }
-
-        Ok(())
+        tarball::extract_tarball(decoder, output_dir, options, progress)
     }
 
     fn list(archive_path: &Path) -> Result<Vec<ArchiveEntry>> {
@@ -493,25 +235,7 @@ impl CompressionFormat for ZstdFormat {
             )
         })?;
 
-        // create tar archive reader
-        let mut archive = tar::Archive::new(decoder);
-
-        let mut entries = Vec::new();
-
-        // read entries without extracting
-        for entry_result in archive.entries()? {
-            let entry = entry_result?;
-            let entry_path = entry.path()?;
-            let header = entry.header();
-
-            entries.push(ArchiveEntry {
-                path: entry_path.to_string_lossy().to_string(),
-                size: header.size()?,
-                is_file: header.entry_type() == tar::EntryType::Regular,
-            });
-        }
-
-        Ok(entries)
+        tarball::list_tarball(decoder)
     }
 
     fn extension() -> &'static str {

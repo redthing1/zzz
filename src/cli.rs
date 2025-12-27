@@ -44,6 +44,10 @@ pub enum Commands {
         #[arg(short = 'e', long)]
         exclude: Vec<String>,
 
+        /// preserve extended attributes (xattrs) in tar-based archives
+        #[arg(long)]
+        keep_xattrs: bool,
+
         /// disable built-in garbage file filtering
         #[arg(short = 'E', long)]
         no_default_excludes: bool,
@@ -76,6 +80,10 @@ pub enum Commands {
         /// strip leading path components
         #[arg(long, default_value = "0")]
         strip_components: usize,
+
+        /// preserve extended attributes (xattrs) when extracting tar-based archives
+        #[arg(long)]
+        keep_xattrs: bool,
 
         /// overwrite existing files
         #[arg(short = 'w', long)]
