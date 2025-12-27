@@ -2,20 +2,22 @@
 
 use indicatif::{ProgressBar, ProgressStyle};
 
-const PROGRESS_TEMPLATE: &str = "{spinner:.green} [{elapsed_precise}] [{bar:.cyan/blue}] {bytes}/{total_bytes} {bytes_per_sec} ({eta})";
+const PROGRESS_BYTES_TEMPLATE: &str =
+    "{spinner:.green} [{elapsed_precise}] [{bar:.cyan/blue}] {bytes}/{total_bytes} {bytes_per_sec} ({eta})";
+const PROGRESS_ITEMS_TEMPLATE: &str =
+    "{spinner:.green} [{elapsed_precise}] [{bar:.cyan/blue}] {pos}/{len} items ({eta})";
 
 pub struct Progress {
     bar: Option<ProgressBar>,
 }
 
 impl Progress {
-    /// create new progress reporter, only shows progress if enabled
-    pub fn new(enabled: bool, total_bytes: u64) -> Self {
+    fn new_with_template(enabled: bool, total: u64, template: &str) -> Self {
         let bar = if enabled {
-            let pb = ProgressBar::new(total_bytes);
+            let pb = ProgressBar::new(total);
             pb.set_style(
                 ProgressStyle::default_bar()
-                    .template(PROGRESS_TEMPLATE)
+                    .template(template)
                     .expect("invalid progress template")
                     .progress_chars("█▉▊▋▌▍▎▏  "),
             );
@@ -25,6 +27,16 @@ impl Progress {
         };
 
         Self { bar }
+    }
+
+    /// create new byte-based progress reporter, only shows progress if enabled
+    pub fn new(enabled: bool, total_bytes: u64) -> Self {
+        Self::new_with_template(enabled, total_bytes, PROGRESS_BYTES_TEMPLATE)
+    }
+
+    /// create new item-count progress reporter, only shows progress if enabled
+    pub fn new_items(enabled: bool, total_items: u64) -> Self {
+        Self::new_with_template(enabled, total_items, PROGRESS_ITEMS_TEMPLATE)
     }
 
     /// update progress with current bytes processed

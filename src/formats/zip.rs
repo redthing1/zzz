@@ -84,9 +84,10 @@ impl CompressionFormat for ZipFormat {
 
             let base_path = input_path.parent().unwrap_or(input_path);
             let mut entries: Vec<_> = WalkDir::new(input_path)
+                .follow_links(false)
                 .into_iter()
+                .filter_entry(|entry| filter.should_include_path(input_path, entry.path()))
                 .filter_map(|e| e.ok())
-                .filter(|entry| filter.should_include(entry.path()))
                 .collect();
 
             // Sort for deterministic archives
@@ -158,27 +159,15 @@ impl CompressionFormat for ZipFormat {
 
         for i in 0..archive.len() {
             let mut file = archive.by_index(i)?;
-            let file_path = file.mangled_name();
-
-            // Security: prevent path traversal
-            if file_path
-                .components()
-                .any(|c| matches!(c, std::path::Component::ParentDir))
-            {
+            let file_path = std::path::Path::new(file.name());
+            let relative_path =
+                crate::utils::sanitize_archive_entry_path(file_path, options.strip_components)?;
+            let Some(relative_path) = relative_path else {
                 continue;
-            }
+            };
+            let target_path = output_dir.join(&relative_path);
 
-            let mut target_path = output_dir.to_path_buf();
-
-            // Handle strip_components
-            let components: Vec<_> = file_path.components().collect();
-            if components.len() > options.strip_components {
-                for component in components.iter().skip(options.strip_components) {
-                    target_path.push(component);
-                }
-            } else {
-                continue; // Skip if not enough components
-            }
+            crate::utils::ensure_no_symlink_ancestors(output_dir, &target_path)?;
 
             // Check for overwrites
             if target_path.exists() && !options.overwrite {
@@ -245,19 +234,14 @@ impl CompressionFormat for ZipFormat {
 
     fn test_integrity(archive_path: &Path) -> Result<()> {
         use std::fs::File;
-        use std::io::Read;
         use zip::ZipArchive;
 
         let file = File::open(archive_path)?;
         let mut archive = ZipArchive::new(file)?;
         for i in 0..archive.len() {
             let mut entry = archive.by_index(i)?;
-            // Try to read a small amount of data or check CRC if available
-            // For now, just attempting to get the entry is a basic check.
-            // To be more thorough, we could try reading from the entry:
             if entry.is_file() {
-                let mut buffer = [0; 1]; // Read 1 byte
-                let _ = entry.read(&mut buffer); // Ignore read amount and errors for now
+                std::io::copy(&mut entry, &mut std::io::sink())?;
             }
         }
         Ok(())

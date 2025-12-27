@@ -80,6 +80,52 @@ pub struct FileFilter {
 }
 
 impl FileFilter {
+    fn normalize_relative_path(path: &Path) -> String {
+        let mut parts = Vec::new();
+        for component in path.components() {
+            if let std::path::Component::Normal(part) = component {
+                parts.push(part.to_string_lossy());
+            }
+        }
+        parts.join("/")
+    }
+
+    fn matches_patterns(patterns: &[Pattern], filename: &str, relative_path: &Path) -> bool {
+        if !filename.is_empty() && patterns.iter().any(|pattern| pattern.matches(filename)) {
+            return true;
+        }
+
+        let components: Vec<String> = relative_path
+            .components()
+            .filter_map(|component| match component {
+                std::path::Component::Normal(part) => Some(part.to_string_lossy().to_string()),
+                _ => None,
+            })
+            .collect();
+
+        if components
+            .iter()
+            .any(|component| patterns.iter().any(|pattern| pattern.matches(component)))
+        {
+            return true;
+        }
+
+        for ancestor in relative_path.ancestors() {
+            let ancestor_str = Self::normalize_relative_path(ancestor);
+            if ancestor_str.is_empty() {
+                continue;
+            }
+            if patterns
+                .iter()
+                .any(|pattern| pattern.matches(&ancestor_str))
+            {
+                return true;
+            }
+        }
+
+        false
+    }
+
     /// create new file filter with optional custom patterns
     pub fn new(use_defaults: bool, custom_patterns: &[String]) -> Result<Self> {
         let mut custom_excludes = Vec::new();
@@ -115,9 +161,49 @@ impl FileFilter {
         false
     }
 
+    /// check if a relative path should be excluded from archiving
+    pub fn should_exclude_relative(&self, relative_path: &Path) -> bool {
+        if relative_path.as_os_str().is_empty() {
+            return false;
+        }
+
+        let filename = relative_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("");
+
+        if Self::matches_patterns(&self.custom_excludes, filename, relative_path) {
+            return true;
+        }
+
+        if self.use_defaults
+            && Self::matches_patterns(&COMPILED_GARBAGE_PATTERNS, filename, relative_path)
+        {
+            return true;
+        }
+
+        false
+    }
+
+    /// check if a path should be excluded, based on its relative path to a root
+    pub fn should_exclude_path(&self, root: &Path, path: &Path) -> bool {
+        let relative_path = path.strip_prefix(root).unwrap_or(path);
+        self.should_exclude_relative(relative_path)
+    }
+
     /// check if a path should be included in archiving (inverse of should_exclude)
     pub fn should_include(&self, path: &Path) -> bool {
         !self.should_exclude(path)
+    }
+
+    /// check if a relative path should be included in archiving
+    pub fn should_include_relative(&self, relative_path: &Path) -> bool {
+        !self.should_exclude_relative(relative_path)
+    }
+
+    /// check if a path should be included, based on its relative path to a root
+    pub fn should_include_path(&self, root: &Path, path: &Path) -> bool {
+        !self.should_exclude_path(root, path)
     }
 }
 
@@ -198,6 +284,19 @@ mod tests {
 
         // Non-matching files should not be excluded
         assert!(!filter.should_exclude(Path::new("Cargo.toml")));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_path_based_matching() -> Result<()> {
+        let filter = FileFilter::new(true, &[])?;
+        let root = Path::new("project");
+
+        assert!(filter.should_exclude_path(root, Path::new("project/.git/config")));
+        assert!(filter.should_exclude_path(root, Path::new("project/vendor/.git/config")));
+        assert!(filter.should_exclude_path(root, Path::new("project/target/debug/app")));
+        assert!(!filter.should_exclude_path(root, Path::new("project/src/main.rs")));
 
         Ok(())
     }

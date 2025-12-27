@@ -12,7 +12,7 @@ use anyhow::Context;
 use flate2::{read::GzDecoder, write::GzEncoder, Compression};
 use std::{
     fs::File,
-    io::{BufReader, BufWriter},
+    io::{BufReader, BufWriter, Read},
     path::Path,
 };
 
@@ -22,6 +22,32 @@ use tar::{Archive, Builder, EntryType};
 use walkdir::WalkDir;
 
 pub struct GzipFormat;
+
+fn file_name_lower(path: &Path) -> String {
+    path.file_name()
+        .map(|n| n.to_string_lossy().to_lowercase())
+        .unwrap_or_default()
+}
+
+fn is_targz(path: &Path) -> bool {
+    let name = file_name_lower(path);
+    name.ends_with(".tar.gz") || name.ends_with(".tgz")
+}
+
+fn is_raw_gz(path: &Path) -> bool {
+    let name = file_name_lower(path);
+    name.ends_with(".gz") && !is_targz(path)
+}
+
+fn raw_output_name(path: &Path) -> Option<String> {
+    let name = path.file_name()?.to_string_lossy();
+    let lower = name.to_lowercase();
+    if lower.ends_with(".gz") {
+        let new_len = name.len().saturating_sub(3);
+        return Some(name[..new_len].to_string());
+    }
+    None
+}
 
 impl CompressionFormat for GzipFormat {
     fn compress(
@@ -41,57 +67,101 @@ impl CompressionFormat for GzipFormat {
             utils::calculate_directory_size(input_path, filter)?
         };
 
-        let output_file = File::create(output_path)
-            .with_context(|| format!("Failed to create output file {}", output_path.display()))?;
-        let buf_writer = BufWriter::new(output_file);
-
         // Map compression level (1-22) to gzip level (0-9)
         let gzip_level = (((options.level as f32 / 22.0) * 9.0) as u32).clamp(0, 9);
-        let encoder = GzEncoder::new(buf_writer, Compression::new(gzip_level));
-        let mut tar_builder = Builder::new(encoder);
-
-        // Configure tar builder for security
-        tar_builder.mode(tar::HeaderMode::Deterministic);
 
         if let Some(progress) = progress {
             progress.set_length(input_size);
         }
 
-        if input_path.is_file() {
-            // Single file compression
-            let file = File::open(input_path)
-                .with_context(|| format!("Failed to open input file {}", input_path.display()))?;
-            let mut header = tar::Header::new_gnu();
-            header.set_size(
-                std::fs::metadata(input_path)
-                    .with_context(|| {
-                        format!(
-                            "Failed to read metadata for input file {}",
-                            input_path.display()
-                        )
-                    })?
-                    .len(),
-            );
-            header.set_mode(0o644);
-            header.set_cksum();
+        // Password protection is not supported for Gzip format
+        if options.password.is_some() {
+            return Err(anyhow::anyhow!(
+                "Password protection is not supported for Gzip format. Use 7z format for password protection."
+            ));
+        }
 
-            let filename = input_path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "Could not determine filename from input path: {}",
-                        input_path.display()
-                    )
+        if input_path.is_file() {
+            if is_raw_gz(output_path) {
+                let output_file = File::create(output_path).with_context(|| {
+                    format!("Failed to create output file {}", output_path.display())
                 })?;
-            tar_builder.append_data(&mut header, filename, file)?;
+                let buf_writer = BufWriter::new(output_file);
+                let mut encoder = GzEncoder::new(buf_writer, Compression::new(gzip_level));
+
+                let mut input_file = File::open(input_path).with_context(|| {
+                    format!("Failed to open input file {}", input_path.display())
+                })?;
+                std::io::copy(&mut input_file, &mut encoder)?;
+                encoder.finish()?;
+            } else {
+                // Single file compression as tarball
+                let output_file = File::create(output_path).with_context(|| {
+                    format!("Failed to create output file {}", output_path.display())
+                })?;
+                let buf_writer = BufWriter::new(output_file);
+                let encoder = GzEncoder::new(buf_writer, Compression::new(gzip_level));
+                let mut tar_builder = Builder::new(encoder);
+
+                // Configure tar builder for security
+                tar_builder.mode(tar::HeaderMode::Deterministic);
+
+                let file = File::open(input_path).with_context(|| {
+                    format!("Failed to open input file {}", input_path.display())
+                })?;
+                let mut header = tar::Header::new_gnu();
+                header.set_size(
+                    std::fs::metadata(input_path)
+                        .with_context(|| {
+                            format!(
+                                "Failed to read metadata for input file {}",
+                                input_path.display()
+                            )
+                        })?
+                        .len(),
+                );
+                header.set_mode(0o644);
+                header.set_cksum();
+
+                let filename =
+                    input_path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "Could not determine filename from input path: {}",
+                                input_path.display()
+                            )
+                        })?;
+                tar_builder.append_data(&mut header, filename, file)?;
+
+                let encoder = tar_builder.into_inner()?;
+                encoder.finish()?;
+            }
         } else {
             // Directory compression
+            if is_raw_gz(output_path) {
+                return Err(anyhow::anyhow!(
+                    "Directory input requires a .tgz or .tar.gz output"
+                ));
+            }
+
+            let output_file = File::create(output_path).with_context(|| {
+                format!("Failed to create output file {}", output_path.display())
+            })?;
+            let buf_writer = BufWriter::new(output_file);
+            let encoder = GzEncoder::new(buf_writer, Compression::new(gzip_level));
+            let mut tar_builder = Builder::new(encoder);
+
+            // Configure tar builder for security
+            tar_builder.mode(tar::HeaderMode::Deterministic);
+
             let base_path = input_path.parent().unwrap_or(input_path);
             let mut entries: Vec<_> = WalkDir::new(input_path)
+                .follow_links(false)
                 .into_iter()
+                .filter_entry(|entry| filter.should_include_path(input_path, entry.path()))
                 .filter_map(|e| e.ok())
-                .filter(|entry| filter.should_include(entry.path()))
                 .collect();
 
             // Sort for deterministic archives
@@ -168,10 +238,10 @@ impl CompressionFormat for GzipFormat {
                     tar_builder.append_data(&mut header, relative_path, std::io::empty())?;
                 }
             }
-        }
 
-        let encoder = tar_builder.into_inner()?;
-        encoder.finish()?;
+            let encoder = tar_builder.into_inner()?;
+            encoder.finish()?;
+        }
 
         let output_size = std::fs::metadata(output_path)?.len();
         Ok(CompressionStats::new(input_size, output_size))
@@ -183,6 +253,40 @@ impl CompressionFormat for GzipFormat {
         options: &ExtractionOptions,
         progress: Option<&crate::progress::Progress>,
     ) -> Result<()> {
+        if is_raw_gz(archive_path) {
+            let output_name = raw_output_name(archive_path)
+                .ok_or_else(|| anyhow::anyhow!("Failed to determine output filename"))?;
+            let relative_path = crate::utils::sanitize_archive_entry_path(
+                Path::new(&output_name),
+                options.strip_components,
+            )?;
+            let Some(relative_path) = relative_path else {
+                return Ok(());
+            };
+            let target_path = output_dir.join(&relative_path);
+
+            crate::utils::ensure_no_symlink_ancestors(output_dir, &target_path)?;
+
+            if target_path.exists() && !options.overwrite {
+                return Err(anyhow::anyhow!(
+                    "output file '{}' already exists. Use --overwrite to replace.",
+                    target_path.display()
+                ));
+            }
+
+            if let Some(parent) = target_path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+
+            let file = File::open(archive_path).with_context(|| {
+                format!("Failed to open archive file {}", archive_path.display())
+            })?;
+            let mut decoder = GzDecoder::new(file);
+            let mut output_file = File::create(&target_path)?;
+            std::io::copy(&mut decoder, &mut output_file)?;
+            return Ok(());
+        }
+
         let file = File::open(archive_path)
             .with_context(|| format!("Failed to open archive file {}", archive_path.display()))?;
         let buf_reader = BufReader::new(file);
@@ -195,26 +299,14 @@ impl CompressionFormat for GzipFormat {
         for entry in archive.entries()? {
             let mut entry = entry?;
             let path = entry.path()?;
-
-            // Security: prevent path traversal
-            if path
-                .components()
-                .any(|c| matches!(c, std::path::Component::ParentDir))
-            {
+            let relative_path =
+                crate::utils::sanitize_archive_entry_path(&path, options.strip_components)?;
+            let Some(relative_path) = relative_path else {
                 continue;
-            }
+            };
+            let target_path = output_dir.join(&relative_path);
 
-            let mut target_path = output_dir.to_path_buf();
-
-            // Handle strip_components
-            let components: Vec<_> = path.components().collect();
-            if components.len() > options.strip_components {
-                for component in components.iter().skip(options.strip_components) {
-                    target_path.push(component);
-                }
-            } else {
-                continue; // Skip if not enough components
-            }
+            crate::utils::ensure_no_symlink_ancestors(output_dir, &target_path)?;
 
             // Check for overwrites
             if target_path.exists() && !options.overwrite {
@@ -252,6 +344,27 @@ impl CompressionFormat for GzipFormat {
     }
 
     fn list(archive_path: &Path) -> Result<Vec<ArchiveEntry>> {
+        if is_raw_gz(archive_path) {
+            let output_name = raw_output_name(archive_path)
+                .ok_or_else(|| anyhow::anyhow!("Failed to determine output filename"))?;
+            let file = File::open(archive_path)?;
+            let mut decoder = GzDecoder::new(file);
+            let mut size = 0u64;
+            let mut buffer = [0u8; 8192];
+            loop {
+                let read = decoder.read(&mut buffer)?;
+                if read == 0 {
+                    break;
+                }
+                size += read as u64;
+            }
+            return Ok(vec![ArchiveEntry {
+                path: output_name,
+                size,
+                is_file: true,
+            }]);
+        }
+
         let file = File::open(archive_path).with_context(|| {
             format!(
                 "Failed to open archive for listing {}",
@@ -293,11 +406,7 @@ impl CompressionFormat for GzipFormat {
         use tar::Archive;
 
         let file = File::open(archive_path)?;
-        if archive_path.extension().is_some_and(|ext| ext == "tgz")
-            || archive_path
-                .file_name()
-                .is_some_and(|name| name.to_string_lossy().ends_with(".tar.gz"))
-        {
+        if is_targz(archive_path) {
             let gz_decoder = GzDecoder::new(file);
             let mut archive = Archive::new(gz_decoder);
             for entry in archive.entries()? {

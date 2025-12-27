@@ -106,26 +106,37 @@ impl ZstdFormat {
     fn collect_files_to_add(
         input_path: &Path,
         filter: &FileFilter,
+        options: &CompressionOptions,
     ) -> Result<Vec<std::path::PathBuf>> {
         let mut files_to_add = Vec::new();
 
         if input_path.is_file() {
             // single file
-            if !filter.should_exclude(input_path) {
+            if let Some(filename) = input_path.file_name() {
+                if filter.should_include_relative(Path::new(filename)) {
+                    files_to_add.push(input_path.to_path_buf());
+                }
+            } else {
                 files_to_add.push(input_path.to_path_buf());
             }
         } else {
             // directory - walk and filter
-            for entry in WalkDir::new(input_path)
-                .follow_links(false)
-                .sort_by(|a, b| a.file_name().cmp(b.file_name()))
-            // deterministic ordering
+            let walker = WalkDir::new(input_path).follow_links(false);
+            let walker = if options.deterministic {
+                walker.sort_by(|a, b| a.path().cmp(b.path()))
+            } else {
+                walker
+            };
+
+            for entry in walker
+                .into_iter()
+                .filter_entry(|entry| filter.should_include_path(input_path, entry.path()))
             {
                 let entry = entry?;
                 let path = entry.path();
 
                 // apply filtering
-                if !filter.should_exclude(path) {
+                if filter.should_include_path(input_path, path) {
                     files_to_add.push(path.to_path_buf());
                 }
             }
@@ -137,22 +148,37 @@ impl ZstdFormat {
     /// Helper function to add files to tar archive (works with any Writer type)
     fn add_files_to_tar<W: Write>(
         tar_builder: &mut Builder<W>,
-        _input_path: &Path,
+        input_path: &Path,
         files_to_add: &[std::path::PathBuf],
-        base_path: &Path,
         options: &CompressionOptions,
         progress: Option<&Progress>,
     ) -> Result<()> {
         let mut bytes_processed = 0u64;
+        let root_name = if input_path.is_dir() {
+            input_path.file_name()
+        } else {
+            None
+        };
 
         for file_path in files_to_add {
             // calculate relative path for archive
-            let archive_path = file_path.strip_prefix(base_path).unwrap_or_else(|_| {
+            let archive_path = if input_path.is_file() {
                 file_path
                     .file_name()
                     .map(std::path::Path::new)
                     .unwrap_or(file_path)
-            });
+                    .to_path_buf()
+            } else {
+                let relative = file_path.strip_prefix(input_path).unwrap_or(file_path);
+                let mut combined = std::path::PathBuf::new();
+                if let Some(root) = root_name {
+                    combined.push(root);
+                }
+                if !relative.as_os_str().is_empty() {
+                    combined.push(relative);
+                }
+                combined
+            };
 
             if file_path.is_file() {
                 let mut file = File::open(file_path).with_context(|| {
@@ -166,7 +192,7 @@ impl ZstdFormat {
                 let mut header = Self::create_file_header(&metadata, options)?;
 
                 // add to archive
-                tar_builder.append_data(&mut header, archive_path, &mut file)?;
+                tar_builder.append_data(&mut header, &archive_path, &mut file)?;
 
                 // update progress
                 bytes_processed += metadata.len();
@@ -174,6 +200,9 @@ impl ZstdFormat {
                     progress.update(bytes_processed);
                 }
             } else if file_path.is_dir() {
+                if archive_path.as_os_str().is_empty() {
+                    continue;
+                }
                 let metadata = file_path.metadata()?;
                 let mut header = Self::create_dir_header(&metadata, options)?;
 
@@ -200,7 +229,7 @@ impl CompressionFormat for ZstdFormat {
         progress: Option<&Progress>,
     ) -> Result<CompressionStats> {
         // calculate input size for progress and stats
-        let input_size = crate::utils::calculate_dir_size(input_path)?;
+        let input_size = crate::utils::calculate_directory_size(input_path, filter)?;
 
         // create output file
         let mut underlying_file = File::create(output_path)
@@ -234,11 +263,8 @@ impl CompressionFormat for ZstdFormat {
             options.threads
         };
 
-        // determine base path for relative paths in archive
-        let base_path = input_path.parent().unwrap_or(Path::new("."));
-
         // collect all files to add (with filtering)
-        let files_to_add = Self::collect_files_to_add(input_path, filter)?;
+        let files_to_add = Self::collect_files_to_add(input_path, filter, options)?;
 
         // Handle encrypted vs unencrypted compression differently
         if let Some(key) = key_material {
@@ -260,7 +286,6 @@ impl CompressionFormat for ZstdFormat {
                 &mut tar_builder,
                 input_path,
                 &files_to_add,
-                base_path,
                 options,
                 progress,
             )?;
@@ -284,7 +309,6 @@ impl CompressionFormat for ZstdFormat {
                 &mut tar_builder,
                 input_path,
                 &files_to_add,
-                base_path,
                 options,
                 progress,
             )?;
@@ -389,17 +413,16 @@ impl CompressionFormat for ZstdFormat {
         for entry_result in archive.entries()? {
             let mut entry = entry_result?;
             let entry_path = entry.path()?;
-
-            // security: prevent directory traversal attacks
-            if entry_path
-                .components()
-                .any(|comp| comp == std::path::Component::ParentDir)
-            {
-                anyhow::bail!("archive contains unsafe path: {}", entry_path.display());
-            }
+            let relative_path =
+                crate::utils::sanitize_archive_entry_path(&entry_path, options.strip_components)?;
+            let Some(relative_path) = relative_path else {
+                continue;
+            };
 
             // calculate output path
-            let output_path = output_dir.join(&entry_path);
+            let output_path = output_dir.join(&relative_path);
+
+            crate::utils::ensure_no_symlink_ancestors(output_dir, &output_path)?;
 
             // check for overwrite
             if output_path.exists() && !options.overwrite {

@@ -3,6 +3,73 @@
 use crate::Result;
 use std::path::Path;
 
+/// sanitize an archive entry path and apply strip_components
+pub fn sanitize_archive_entry_path(
+    entry_path: &Path,
+    strip_components: usize,
+) -> Result<Option<std::path::PathBuf>> {
+    use std::path::{Component, PathBuf};
+
+    let mut components: Vec<std::ffi::OsString> = Vec::new();
+
+    for component in entry_path.components() {
+        match component {
+            Component::Prefix(_) | Component::RootDir | Component::ParentDir => {
+                return Err(anyhow::anyhow!(
+                    "unsafe archive path: {}",
+                    entry_path.display()
+                ));
+            }
+            Component::CurDir => {}
+            Component::Normal(part) => components.push(part.to_os_string()),
+        }
+    }
+
+    if strip_components >= components.len() {
+        return Ok(None);
+    }
+
+    let mut sanitized = PathBuf::new();
+    for component in components.into_iter().skip(strip_components) {
+        sanitized.push(component);
+    }
+
+    Ok(Some(sanitized))
+}
+
+/// ensure no symlink exists in the target path's ancestor chain under root
+pub fn ensure_no_symlink_ancestors(root: &Path, target: &Path) -> Result<()> {
+    use std::io::ErrorKind;
+    use std::path::PathBuf;
+
+    let relative = target.strip_prefix(root).map_err(|_| {
+        anyhow::anyhow!(
+            "target path '{}' is outside extraction root '{}'",
+            target.display(),
+            root.display()
+        )
+    })?;
+
+    let mut current = PathBuf::from(root);
+    for component in relative.components() {
+        current.push(component);
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) => {
+                if metadata.file_type().is_symlink() {
+                    return Err(anyhow::anyhow!(
+                        "unsafe archive path: symlink ancestor '{}'",
+                        current.display()
+                    ));
+                }
+            }
+            Err(err) if err.kind() == ErrorKind::NotFound => {}
+            Err(err) => return Err(err.into()),
+        }
+    }
+
+    Ok(())
+}
+
 /// calculate total size of a directory recursively
 pub fn calculate_dir_size(path: &Path) -> Result<u64> {
     let mut total = 0;
@@ -26,12 +93,22 @@ pub fn calculate_directory_size(path: &Path, filter: &crate::filter::FileFilter)
     let mut total = 0;
 
     if path.is_file() {
+        if let Some(filename) = path.file_name() {
+            if !filter.should_include_relative(Path::new(filename)) {
+                return Ok(0);
+            }
+        }
         return Ok(path.metadata()?.len());
     }
 
-    for entry in walkdir::WalkDir::new(path) {
+    let walker = walkdir::WalkDir::new(path)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|entry| filter.should_include_path(path, entry.path()));
+
+    for entry in walker {
         let entry = entry?;
-        if entry.file_type().is_file() && filter.should_include(entry.path()) {
+        if entry.file_type().is_file() {
             total += entry.metadata()?.len();
         }
     }

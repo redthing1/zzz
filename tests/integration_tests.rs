@@ -1,5 +1,6 @@
 //! Integration tests for zzz compression functionality
 
+use std::env;
 use std::fs;
 use std::path::Path;
 use tempfile::TempDir;
@@ -250,6 +251,60 @@ fn test_no_default_excludes() -> Result<()> {
     assert!(extract_dir.join("source/normal.txt").exists());
     assert!(extract_dir.join("source/.DS_Store").exists());
     assert!(extract_dir.join("source/thumbs.db").exists());
+
+    Ok(())
+}
+
+#[test]
+fn test_relative_directory_preserves_root() -> Result<()> {
+    let cwd = env::current_dir()?;
+    let temp_dir = TempDir::new_in(&cwd)?;
+    let source_dir = temp_dir.path().join("rel_source");
+    fs::create_dir(&source_dir)?;
+    fs::write(source_dir.join("file.txt"), "relative content")?;
+
+    let relative_source = source_dir.strip_prefix(&cwd)?;
+    let archive_path = temp_dir.path().join("relative.zst");
+    let extract_dir = temp_dir.path().join("extract");
+
+    let options = CompressionOptions::default();
+    let filter = FileFilter::new(true, &[])?;
+    ZstdFormat::compress(relative_source, &archive_path, &options, &filter, None)?;
+
+    fs::create_dir(&extract_dir)?;
+    let extract_options = ExtractionOptions::default();
+    ZstdFormat::extract(&archive_path, &extract_dir, &extract_options, None)?;
+
+    assert!(extract_dir.join("rel_source/file.txt").exists());
+
+    Ok(())
+}
+
+#[test]
+fn test_directory_excludes_are_pruned() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+    let source_dir = temp_dir.path().join("source");
+    fs::create_dir(&source_dir)?;
+    fs::write(source_dir.join("keep.txt"), "keep")?;
+    fs::create_dir_all(source_dir.join("target/debug"))?;
+    fs::write(source_dir.join("target/debug/skip.txt"), "skip")?;
+    fs::create_dir_all(source_dir.join(".git/objects"))?;
+    fs::write(source_dir.join(".git/objects/obj"), "skip")?;
+
+    let archive_path = temp_dir.path().join("filtered.zst");
+    let extract_dir = temp_dir.path().join("extract");
+
+    let options = CompressionOptions::default();
+    let filter = FileFilter::new(true, &[])?;
+    ZstdFormat::compress(&source_dir, &archive_path, &options, &filter, None)?;
+
+    fs::create_dir(&extract_dir)?;
+    let extract_options = ExtractionOptions::default();
+    ZstdFormat::extract(&archive_path, &extract_dir, &extract_options, None)?;
+
+    assert!(extract_dir.join("source/keep.txt").exists());
+    assert!(!extract_dir.join("source/target/debug/skip.txt").exists());
+    assert!(!extract_dir.join("source/.git/objects/obj").exists());
 
     Ok(())
 }

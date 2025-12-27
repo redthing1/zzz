@@ -79,6 +79,7 @@ fn run(cli: Cli) -> zzz_arc::Result<()> {
             archive,
             destination,
             directory,
+            strip_components,
             overwrite,
             password,
         } => {
@@ -86,8 +87,8 @@ fn run(cli: Cli) -> zzz_arc::Result<()> {
 
             let options = ExtractionOptions {
                 overwrite,
+                strip_components,
                 password,
-                ..Default::default()
             };
 
             extract::extract(&archive, &extract_dir, options, cli.verbose)?;

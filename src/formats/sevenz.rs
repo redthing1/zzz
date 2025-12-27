@@ -76,9 +76,10 @@ impl CompressionFormat for SevenZFormat {
             // Directory compression - preserve directory structure like our other formats
             let base_path = input_path.parent().unwrap_or(input_path);
             let mut entries: Vec<_> = WalkDir::new(input_path)
+                .follow_links(false)
                 .into_iter()
+                .filter_entry(|entry| filter.should_include_path(input_path, entry.path()))
                 .filter_map(|e| e.ok())
-                .filter(|entry| filter.should_include(entry.path()))
                 .collect();
 
             // Sort for deterministic archives
@@ -184,26 +185,18 @@ impl CompressionFormat for SevenZFormat {
         let mut processed_count = 0;
         sz.for_each_entries(|entry, reader| {
             let file_path = std::path::Path::new(&entry.name);
-
-            // Security: prevent path traversal
-            if file_path
-                .components()
-                .any(|c| matches!(c, std::path::Component::ParentDir))
-            {
+            let relative_path =
+                crate::utils::sanitize_archive_entry_path(file_path, options.strip_components)
+                    .map_err(|e| {
+                        std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string())
+                    })?;
+            let Some(relative_path) = relative_path else {
                 return Ok(true);
-            }
+            };
+            let target_path = output_dir.join(&relative_path);
 
-            let mut target_path = output_dir.to_path_buf();
-
-            // Handle strip_components
-            let components: Vec<_> = file_path.components().collect();
-            if components.len() > options.strip_components {
-                for component in components.iter().skip(options.strip_components) {
-                    target_path.push(component);
-                }
-            } else {
-                return Ok(true); // Skip if not enough components
-            }
+            crate::utils::ensure_no_symlink_ancestors(output_dir, &target_path)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
             // Check for overwrites
             if target_path.exists() && !options.overwrite {

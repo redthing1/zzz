@@ -241,6 +241,91 @@ fn test_directory_traversal_protection() -> Result<()> {
 }
 
 #[test]
+fn test_extract_rejects_unsafe_paths() -> Result<()> {
+    use std::io::Write;
+
+    let temp_dir = TempDir::new()?;
+    let archive_path = temp_dir.path().join("unsafe.zip");
+    let extract_dir = temp_dir.path().join("extract");
+    fs::create_dir(&extract_dir)?;
+
+    let output_file = fs::File::create(&archive_path)?;
+    let mut zip = zip::ZipWriter::new(output_file);
+    zip.start_file("../evil.txt", zip::write::FileOptions::default())?;
+    zip.write_all(b"unsafe content")?;
+    zip.finish()?;
+
+    let options = ExtractionOptions::default();
+    let result =
+        zzz_arc::formats::zip::ZipFormat::extract(&archive_path, &extract_dir, &options, None);
+
+    assert!(result.is_err());
+    let error_msg = result.unwrap_err().to_string();
+    assert!(error_msg.contains("unsafe archive path"));
+
+    Ok(())
+}
+
+#[test]
+fn test_zip_integrity_detects_corruption() -> Result<()> {
+    use std::io::Write;
+    use zip::write::FileOptions;
+
+    let temp_dir = TempDir::new()?;
+    let archive_path = temp_dir.path().join("corrupt.zip");
+
+    let file = fs::File::create(&archive_path)?;
+    let mut zip = zip::ZipWriter::new(file);
+    zip.start_file("file.txt", FileOptions::default())?;
+    zip.write_all(b"zip content")?;
+    zip.finish()?;
+
+    let mut data = fs::read(&archive_path)?;
+    if let Some(last) = data.last_mut() {
+        *last ^= 0xFF;
+    }
+    fs::write(&archive_path, data)?;
+
+    let result = zzz_arc::formats::zip::ZipFormat::test_integrity(&archive_path);
+    assert!(result.is_err());
+
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn test_extract_rejects_symlink_ancestor() -> Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::symlink;
+    use zip::write::FileOptions;
+
+    let temp_dir = TempDir::new()?;
+    let archive_path = temp_dir.path().join("symlink.zip");
+    let extract_dir = temp_dir.path().join("extract");
+    let outside_dir = temp_dir.path().join("outside");
+
+    fs::create_dir(&extract_dir)?;
+    fs::create_dir(&outside_dir)?;
+    symlink(&outside_dir, extract_dir.join("link"))?;
+
+    let file = fs::File::create(&archive_path)?;
+    let mut zip = zip::ZipWriter::new(file);
+    zip.start_file("link/evil.txt", FileOptions::default())?;
+    zip.write_all(b"evil")?;
+    zip.finish()?;
+
+    let options = ExtractionOptions::default();
+    let result =
+        zzz_arc::formats::zip::ZipFormat::extract(&archive_path, &extract_dir, &options, None);
+
+    assert!(result.is_err());
+    let error_msg = result.unwrap_err().to_string();
+    assert!(error_msg.contains("symlink ancestor"));
+
+    Ok(())
+}
+
+#[test]
 fn test_empty_directory_handling() -> Result<()> {
     let temp_dir = TempDir::new()?;
     let empty_dir = temp_dir.path().join("empty");

@@ -73,6 +73,10 @@ pub enum Commands {
         #[arg(short = 'C', long)]
         directory: Option<PathBuf>,
 
+        /// strip leading path components
+        #[arg(long, default_value = "0")]
+        strip_components: usize,
+
         /// overwrite existing files
         #[arg(short = 'w', long)]
         overwrite: bool,

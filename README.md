@@ -26,15 +26,24 @@ cargo install --path .
 ```sh
 # compress
 zzz c input/ -o archive.zst
-zzz c file.txt -f zip -p password
+zzz c file.txt -f 7z -p password
+zzz c file.txt -f gz -o file.txt.gz
 
-# extract  
+# extract
 zzz x archive.zst
-zzz x archive.zip -p password -C output/
+zzz x archive.7z -p password -C output/
+zzz x file.txt.gz -C output/
+zzz x archive.tgz -C output/ --strip-components 1
 
 # list contents
 zzz l archive.tgz
+zzz l file.txt.xz
 
 # test integrity
 zzz t archive.7z
 ```
+
+Notes:
+
+- raw `.gz`/`.xz` outputs are treated as single-file streams; use `.tgz`/`.txz` (or `.tar.gz`/`.tar.xz`) for tarballs.
+- `--strip-components` drops leading path segments during extraction.

@@ -36,8 +36,7 @@ pub fn extract(
     }
 
     // create progress tracker (enabled when verbose)
-    let archive_size = std::fs::metadata(archive_path)?.len();
-    let progress = Progress::new(verbose, archive_size);
+    let progress = Progress::new_items(verbose, 0);
 
     // dispatch to appropriate format implementation
     match format {

@@ -25,7 +25,7 @@ impl CompressionFormat for RarFormat {
     fn extract(
         archive_path: &Path,
         output_dir: &Path,
-        _options: &ExtractionOptions,
+        options: &ExtractionOptions,
         progress: Option<&crate::progress::Progress>,
     ) -> Result<()> {
         use unrar::Archive;
@@ -36,8 +36,19 @@ impl CompressionFormat for RarFormat {
         while let Some(header) = archive.read_header()? {
             let entry = header.entry();
 
+            let relative_path = crate::utils::sanitize_archive_entry_path(
+                entry.filename.as_path(),
+                options.strip_components,
+            )?;
+            let Some(relative_path) = relative_path else {
+                archive = header.skip()?;
+                continue;
+            };
+
             if entry.is_file() {
-                let output_path = output_dir.join(&entry.filename);
+                let output_path = output_dir.join(&relative_path);
+
+                crate::utils::ensure_no_symlink_ancestors(output_dir, &output_path)?;
 
                 if let Some(parent) = output_path.parent() {
                     std::fs::create_dir_all(parent)?;
