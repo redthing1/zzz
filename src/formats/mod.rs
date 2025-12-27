@@ -48,6 +48,7 @@ pub struct CompressionOptions {
     pub threads: u32,                // 0 = auto-detect CPU cores
     pub normalize_permissions: bool, // security: normalize permissions/ownership
     pub strip_xattrs: bool,          // security: strip extended attributes (xattrs)
+    pub strip_timestamps: bool,      // security: strip filesystem timestamps
     pub deterministic: bool,         // sort files for reproducible archives
     pub password: Option<String>,
 }
@@ -59,6 +60,7 @@ impl Default for CompressionOptions {
             threads: 0, // auto-detect
             normalize_permissions: true,
             strip_xattrs: true,
+            strip_timestamps: false,
             deterministic: true,
             password: None,
         }
@@ -71,6 +73,7 @@ pub struct ExtractionOptions {
     pub overwrite: bool,
     pub strip_components: usize,
     pub strip_xattrs: bool,
+    pub strip_timestamps: bool,
     pub password: Option<String>,
 }
 
@@ -80,6 +83,7 @@ impl Default for ExtractionOptions {
             overwrite: false,
             strip_components: 0,
             strip_xattrs: true,
+            strip_timestamps: false,
             password: None,
         }
     }

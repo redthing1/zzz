@@ -215,6 +215,90 @@ fn test_compress_with_custom_excludes() -> Result<()> {
 }
 
 #[test]
+fn test_redact_excludes_sensitive_files() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+    let source_dir = temp_dir.path().join("source");
+    let output_file = temp_dir.path().join("redact.zst");
+
+    fs::create_dir(&source_dir)?;
+    fs::write(source_dir.join(".env"), "SECRET=1")?;
+    fs::write(source_dir.join("keep.txt"), "safe")?;
+
+    zzz_cmd()
+        .args(["compress", "--redact", "-f", "zst", "-o"])
+        .arg(&output_file)
+        .arg(&source_dir)
+        .assert()
+        .success();
+
+    zzz_cmd()
+        .args(["list"])
+        .arg(&output_file)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("keep.txt"))
+        .stdout(predicate::str::contains(".env").not());
+
+    Ok(())
+}
+
+#[test]
+fn test_redact_excludes_sensitive_files_without_defaults() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+    let source_dir = temp_dir.path().join("source");
+    let output_file = temp_dir.path().join("redact_no_defaults.zst");
+
+    fs::create_dir(&source_dir)?;
+    fs::write(source_dir.join(".env"), "SECRET=1")?;
+    fs::write(source_dir.join("keep.txt"), "safe")?;
+
+    zzz_cmd()
+        .args(["compress", "--redact", "-E", "-f", "zst", "-o"])
+        .arg(&output_file)
+        .arg(&source_dir)
+        .assert()
+        .success();
+
+    zzz_cmd()
+        .args(["list"])
+        .arg(&output_file)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("keep.txt"))
+        .stdout(predicate::str::contains(".env").not());
+
+    Ok(())
+}
+
+#[test]
+fn test_defaults_do_not_exclude_sensitive_files() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+    let source_dir = temp_dir.path().join("source");
+    let output_file = temp_dir.path().join("defaults_include.zst");
+
+    fs::create_dir(&source_dir)?;
+    fs::write(source_dir.join(".env"), "SECRET=1")?;
+    fs::write(source_dir.join("keep.txt"), "safe")?;
+
+    zzz_cmd()
+        .args(["compress", "-f", "zst", "-o"])
+        .arg(&output_file)
+        .arg(&source_dir)
+        .assert()
+        .success();
+
+    zzz_cmd()
+        .args(["list"])
+        .arg(&output_file)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("keep.txt"))
+        .stdout(predicate::str::contains(".env"));
+
+    Ok(())
+}
+
+#[test]
 fn test_extract_archive() -> Result<()> {
     let temp_dir = TempDir::new()?;
     let source_file = temp_dir.path().join("test.txt");

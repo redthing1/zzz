@@ -9,10 +9,19 @@ use crate::{
     utils, Result,
 };
 use anyhow::Context;
+use filetime::FileTime;
 use sevenz_rust::{Password, SevenZArchiveEntry, SevenZReader, SevenZWriter};
 use std::{fs::File, path::Path};
 
 pub struct SevenZFormat;
+
+fn sanitize_entry_timestamps(entry: &mut SevenZArchiveEntry, options: &CompressionOptions) {
+    if options.strip_timestamps {
+        entry.has_creation_date = false;
+        entry.has_last_modified_date = false;
+        entry.has_access_date = false;
+    }
+}
 
 impl CompressionFormat for SevenZFormat {
     fn compress(
@@ -74,7 +83,8 @@ impl CompressionFormat for SevenZFormat {
                 )
             })?;
 
-            let entry = SevenZArchiveEntry::from_path(input_path, filename.to_string());
+            let mut entry = SevenZArchiveEntry::from_path(input_path, filename.to_string());
+            sanitize_entry_timestamps(&mut entry, options);
             sz.push_archive_entry(
                 entry,
                 Some(File::open(input_path).with_context(|| {
@@ -102,7 +112,8 @@ impl CompressionFormat for SevenZFormat {
                 let path_str = relative_path.to_string_lossy().to_string();
 
                 if path.is_file() {
-                    let archive_entry = SevenZArchiveEntry::from_path(path, path_str);
+                    let mut archive_entry = SevenZArchiveEntry::from_path(path, path_str);
+                    sanitize_entry_timestamps(&mut archive_entry, options);
                     sz.push_archive_entry(
                         archive_entry,
                         Some(File::open(path).with_context(|| {
@@ -224,6 +235,13 @@ impl CompressionFormat for SevenZFormat {
             } else {
                 let mut output_file = File::create(&target_path)?;
                 std::io::copy(reader, &mut output_file)?;
+                drop(output_file);
+
+                if !options.strip_timestamps && entry.has_last_modified_date {
+                    let system_time = std::time::SystemTime::from(entry.last_modified_date);
+                    let file_time = FileTime::from_system_time(system_time);
+                    filetime::set_file_mtime(&target_path, file_time)?;
+                }
             }
 
             // Update progress

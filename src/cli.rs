@@ -48,6 +48,14 @@ pub enum Commands {
         #[arg(long)]
         keep_xattrs: bool,
 
+        /// strip timestamps, ownership, and xattrs, and exclude common secrets (overrides keep flags)
+        #[arg(long)]
+        redact: bool,
+
+        /// strip filesystem timestamps in archive entries
+        #[arg(long)]
+        strip_timestamps: bool,
+
         /// disable built-in garbage file filtering
         #[arg(short = 'E', long)]
         no_default_excludes: bool,
@@ -84,6 +92,10 @@ pub enum Commands {
         /// preserve extended attributes (xattrs) when extracting tar-based archives
         #[arg(long)]
         keep_xattrs: bool,
+
+        /// strip filesystem timestamps when extracting tar-based archives
+        #[arg(long)]
+        strip_timestamps: bool,
 
         /// overwrite existing files
         #[arg(short = 'w', long)]

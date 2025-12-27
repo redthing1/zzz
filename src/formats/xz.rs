@@ -106,7 +106,7 @@ impl CompressionFormat for XzFormat {
                         normalize_ownership: options.normalize_permissions,
                         apply_filter_to_single_file: true,
                         directory_slash: false,
-                        set_mtime_for_single_file: false,
+                        set_mtime_for_single_file: true,
                     },
                 )?;
                 encoder.finish()?;
@@ -133,7 +133,7 @@ impl CompressionFormat for XzFormat {
                     normalize_ownership: options.normalize_permissions,
                     apply_filter_to_single_file: true,
                     directory_slash: false,
-                    set_mtime_for_single_file: false,
+                    set_mtime_for_single_file: true,
                 },
             )?;
             encoder.finish()?;

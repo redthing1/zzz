@@ -10,7 +10,7 @@ use crate::{
     utils, Result,
 };
 use anyhow::Context;
-use flate2::{read::GzDecoder, write::GzEncoder, Compression};
+use flate2::{read::GzDecoder, write::GzEncoder, Compression, GzBuilder};
 use std::{
     fs::File,
     io::{BufReader, BufWriter, Read},
@@ -43,6 +43,24 @@ fn raw_output_name(path: &Path) -> Option<String> {
         return Some(name[..new_len].to_string());
     }
     None
+}
+
+fn gzip_mtime(path: &Path, options: &CompressionOptions) -> u32 {
+    if options.strip_timestamps {
+        return 0;
+    }
+
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return 0;
+    };
+    let Ok(modified) = metadata.modified() else {
+        return 0;
+    };
+    let Ok(duration) = modified.duration_since(std::time::UNIX_EPOCH) else {
+        return 0;
+    };
+
+    duration.as_secs().min(u64::from(u32::MAX)) as u32
 }
 
 impl CompressionFormat for GzipFormat {
@@ -78,18 +96,23 @@ impl CompressionFormat for GzipFormat {
                             format!("Failed to create output file {}", output_path.display())
                         })?;
                         let buf_writer = BufWriter::new(output_file);
-                        let encoder = GzEncoder::new(buf_writer, Compression::new(gzip_level));
+                        let encoder = GzBuilder::new()
+                            .mtime(0)
+                            .write(buf_writer, Compression::new(gzip_level));
                         encoder.finish()?;
                         let output_size = std::fs::metadata(output_path)?.len();
                         return Ok(CompressionStats::new(input_size, output_size));
                     }
                 }
 
+                let mtime = gzip_mtime(input_path, options);
                 let output_file = File::create(output_path).with_context(|| {
                     format!("Failed to create output file {}", output_path.display())
                 })?;
                 let buf_writer = BufWriter::new(output_file);
-                let mut encoder = GzEncoder::new(buf_writer, Compression::new(gzip_level));
+                let mut encoder = GzBuilder::new()
+                    .mtime(mtime)
+                    .write(buf_writer, Compression::new(gzip_level));
 
                 let mut input_file = File::open(input_path).with_context(|| {
                     format!("Failed to open input file {}", input_path.display())
@@ -112,7 +135,7 @@ impl CompressionFormat for GzipFormat {
                         normalize_ownership: options.normalize_permissions,
                         apply_filter_to_single_file: true,
                         directory_slash: false,
-                        set_mtime_for_single_file: false,
+                        set_mtime_for_single_file: true,
                     },
                 )?;
                 encoder.finish()?;
@@ -139,7 +162,7 @@ impl CompressionFormat for GzipFormat {
                     normalize_ownership: options.normalize_permissions,
                     apply_filter_to_single_file: true,
                     directory_slash: false,
-                    set_mtime_for_single_file: false,
+                    set_mtime_for_single_file: true,
                 },
             )?;
             encoder.finish()?;

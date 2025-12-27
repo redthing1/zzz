@@ -9,14 +9,18 @@ use walkdir::WalkDir;
 /// comprehensive list of garbage files to exclude by default
 pub const GARBAGE_FILES: &[&str] = &[
     // macOS system files
+    "__MACOSX",
+    ".AppleDouble",
     ".DS_Store",
-    "._*",                     // resource forks
+    "._*", // resource forks
+    ".LSOverride",
     ".Spotlight-V100",         // spotlight index
     ".Trashes",                // trash
     ".fseventsd",              // filesystem events
     ".VolumeIcon.icns",        // volume icons
     ".DocumentRevisions-V100", // document revisions
     ".TemporaryItems",         // temporary items
+    "Icon\r",                  // finder icon
     // Windows system files
     "thumbs.db",
     "Thumbs.db",
@@ -34,27 +38,52 @@ pub const GARBAGE_FILES: &[&str] = &[
     ".trash",
     ".Trash-*", // trash directories
     ".nfs*",    // NFS lock files
+    "lost+found",
     // Development artifacts
     "__pycache__",
     "*.pyc",
     "*.pyo",
     "*.pyd",
+    ".mypy_cache",
     ".pytest_cache",
+    ".ruff_cache",
+    ".hypothesis",
     ".coverage",
+    ".nox",
     ".tox",
+    "__pypackages__",
+    ".venv",
+    "venv",
     "node_modules",
     ".npm",
+    ".pnpm-store",
     ".yarn",
+    ".yarn-cache",
+    "bower_components",
     ".git",
     ".svn",
     ".hg",
     ".bzr",
+    "target",
     "target/debug",
     "target/release", // Rust build dirs
     ".gradle",
     ".maven",
     ".vscode",
     ".idea", // IDE files (configurable)
+    ".direnv",
+    ".cache",
+    ".parcel-cache",
+    ".turbo",
+    ".next",
+    ".nuxt",
+    ".svelte-kit",
+    "CMakeFiles",
+    "CMakeCache.txt",
+    "cmake-build-*",
+    "npm-debug.log",
+    "yarn-error.log",
+    "pnpm-debug.log",
     // Temporary/backup files
     "*.tmp",
     "*.temp",
@@ -66,6 +95,34 @@ pub const GARBAGE_FILES: &[&str] = &[
     "*.swp",
     "*.swo",  // vim swap files
     ".*.sw?", // vim swap file pattern
+];
+
+/// common sensitive files and directories for redact mode
+pub const SENSITIVE_FILES: &[&str] = &[
+    ".env",
+    ".env.*",
+    ".npmrc",
+    ".pypirc",
+    ".netrc",
+    ".aws",
+    ".ssh",
+    ".gnupg",
+    ".kube",
+    "id_rsa",
+    "id_dsa",
+    "id_ecdsa",
+    "id_ed25519",
+    "*.pem",
+    "*.key",
+    "*.p12",
+    "*.pfx",
+    "*.kdbx",
+    "*.gpg",
+    "*.pgp",
+    "*.age",
+    ".sops.yaml",
+    ".sops.yml",
+    ".sops.json",
 ];
 
 static COMPILED_GARBAGE_PATTERNS: Lazy<Vec<Pattern>> = Lazy::new(|| {
@@ -234,6 +291,17 @@ mod tests {
         assert!(filter.should_exclude(Path::new("__pycache__")));
         assert!(filter.should_exclude(Path::new("node_modules")));
         assert!(filter.should_exclude(Path::new(".git")));
+        assert!(filter.should_exclude(Path::new("__MACOSX")));
+        assert!(filter.should_exclude(Path::new(".AppleDouble")));
+        assert!(filter.should_exclude(Path::new("lost+found")));
+        assert!(filter.should_exclude(Path::new(".mypy_cache")));
+        assert!(filter.should_exclude(Path::new(".ruff_cache")));
+        assert!(filter.should_exclude(Path::new("npm-debug.log")));
+        assert!(filter.should_exclude(Path::new("target")));
+        assert!(filter.should_exclude(Path::new(".cache")));
+        assert!(filter.should_exclude(Path::new(".venv")));
+        assert!(filter.should_exclude(Path::new("__pypackages__")));
+        assert!(filter.should_exclude(Path::new("CMakeCache.txt")));
 
         // Test pattern matching
         assert!(filter.should_exclude(Path::new("._resource_fork")));
@@ -245,6 +313,7 @@ mod tests {
         assert!(!filter.should_exclude(Path::new("README.md")));
         assert!(!filter.should_exclude(Path::new("src/main.rs")));
         assert!(!filter.should_exclude(Path::new("Cargo.toml")));
+        assert!(!filter.should_exclude(Path::new(".env")));
 
         Ok(())
     }
@@ -296,6 +365,27 @@ mod tests {
 
         // Non-matching files should not be excluded
         assert!(!filter.should_exclude(Path::new("Cargo.toml")));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_sensitive_patterns_match_paths() -> Result<()> {
+        let custom_patterns = SENSITIVE_FILES
+            .iter()
+            .map(|pattern| (*pattern).to_string())
+            .collect::<Vec<_>>();
+        let filter = FileFilter::new(true, &custom_patterns)?;
+
+        assert!(filter.should_exclude_relative(Path::new(".env")));
+        assert!(filter.should_exclude_relative(Path::new("config/.env.local")));
+        assert!(filter.should_exclude_relative(Path::new(".ssh/id_rsa")));
+        assert!(filter.should_exclude_relative(Path::new("config/.aws/credentials")));
+        assert!(filter.should_exclude_relative(Path::new("keys/server.pem")));
+        assert!(filter.should_exclude_relative(Path::new("keys/key.p12")));
+        assert!(filter.should_exclude_relative(Path::new("vault/passwords.kdbx")));
+
+        assert!(!filter.should_exclude_relative(Path::new("docs/notes.txt")));
 
         Ok(())
     }

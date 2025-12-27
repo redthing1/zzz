@@ -47,3 +47,4 @@ Notes:
 
 - raw `.gz`/`.xz` outputs are treated as single-file streams; use `.tgz`/`.txz` (or `.tar.gz`/`.tar.xz`) for tarballs.
 - `--strip-components` drops leading path segments during extraction.
+- archives strip ownership and xattrs by default; use `--keep-xattrs` to preserve, `--strip-timestamps` for timestamps only, or `--redact` to strip metadata and exclude common secrets.

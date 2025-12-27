@@ -130,6 +130,7 @@ fn create_dir_header(
     metadata: &std::fs::Metadata,
     options: &CompressionOptions,
     normalize_ownership: bool,
+    set_mtime: bool,
 ) -> Result<tar::Header> {
     let mut header = tar::Header::new_gnu();
     header.set_entry_type(EntryType::Directory);
@@ -147,7 +148,7 @@ fn create_dir_header(
         }
     });
 
-    apply_header_normalization(&mut header, metadata, normalize_ownership, true)?;
+    apply_header_normalization(&mut header, metadata, normalize_ownership, set_mtime)?;
     header.set_cksum();
     Ok(header)
 }
@@ -190,7 +191,7 @@ pub fn build_tarball<W: Write>(
             &metadata,
             options,
             build_options.normalize_ownership,
-            build_options.set_mtime_for_single_file,
+            !options.strip_timestamps && build_options.set_mtime_for_single_file,
         )?;
 
         let filename = input_path
@@ -241,8 +242,12 @@ pub fn build_tarball<W: Write>(
             let file = File::open(path)
                 .with_context(|| format!("Failed to open file for archiving {}", path.display()))?;
             let metadata = entry.metadata()?;
-            let mut header =
-                create_file_header(&metadata, options, build_options.normalize_ownership, true)?;
+            let mut header = create_file_header(
+                &metadata,
+                options,
+                build_options.normalize_ownership,
+                !options.strip_timestamps,
+            )?;
             tar_builder.append_data(&mut header, &archive_path, file)?;
 
             bytes_processed += metadata.len();
@@ -259,8 +264,12 @@ pub fn build_tarball<W: Write>(
             }
 
             let metadata = entry.metadata()?;
-            let mut header =
-                create_dir_header(&metadata, options, build_options.normalize_ownership)?;
+            let mut header = create_dir_header(
+                &metadata,
+                options,
+                build_options.normalize_ownership,
+                !options.strip_timestamps,
+            )?;
             if build_options.directory_slash {
                 let mut dir_path = archive_path.to_string_lossy().to_string();
                 if !dir_path.ends_with('/') {
@@ -283,6 +292,7 @@ pub fn extract_tarball<R: Read>(
     progress: Option<&Progress>,
 ) -> Result<()> {
     let mut archive = Archive::new(reader);
+    archive.set_preserve_mtime(!options.strip_timestamps);
     archive.set_unpack_xattrs(!options.strip_xattrs);
     std::fs::create_dir_all(output_dir)?;
 

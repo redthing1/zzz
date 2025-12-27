@@ -26,8 +26,10 @@ fn run(cli: Cli) -> zzz_arc::Result<()> {
             output,
             level,
             progress,
-            exclude,
+            mut exclude,
             keep_xattrs,
+            redact,
+            strip_timestamps,
             no_default_excludes,
             format,
             password,
@@ -46,13 +48,25 @@ fn run(cli: Cli) -> zzz_arc::Result<()> {
                 }
             }
 
-            let options = CompressionOptions {
+            let mut options = CompressionOptions {
                 level,
                 threads: cli.threads,
                 password,
                 strip_xattrs: !keep_xattrs,
+                strip_timestamps,
                 ..Default::default()
             };
+            if redact {
+                options.normalize_permissions = true;
+                options.strip_xattrs = true;
+                options.strip_timestamps = true;
+                options.deterministic = true;
+                exclude.extend(
+                    zzz_arc::filter::SENSITIVE_FILES
+                        .iter()
+                        .map(|pattern| (*pattern).to_string()),
+                );
+            }
 
             let filter = FileFilter::new(!no_default_excludes, &exclude)?;
 
@@ -83,6 +97,7 @@ fn run(cli: Cli) -> zzz_arc::Result<()> {
             directory,
             strip_components,
             keep_xattrs,
+            strip_timestamps,
             overwrite,
             password,
         } => {
@@ -92,6 +107,7 @@ fn run(cli: Cli) -> zzz_arc::Result<()> {
                 overwrite,
                 strip_components,
                 strip_xattrs: !keep_xattrs,
+                strip_timestamps,
                 password,
             };
 

@@ -26,6 +26,8 @@ glob = "0.3"
 num_cpus = "1.16"
 once_cell = "1.19.0"
 xattr = "1.5"
+time = "0.3"
+filetime = "0.2"
 # encryption dependencies
 argon2 = "0.5"
 aes-gcm = "0.10"

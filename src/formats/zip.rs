@@ -9,16 +9,31 @@ use crate::{
     utils, Result,
 };
 use anyhow::Context;
+use filetime::FileTime;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::{
     fs::File,
     io::{BufReader, BufWriter},
     path::Path,
+    time::SystemTime,
 };
+use time::OffsetDateTime;
 use zip::{write::FileOptions, CompressionMethod, ZipArchive, ZipWriter};
 
 pub struct ZipFormat;
+
+fn zip_last_modified(metadata: &std::fs::Metadata, strip_timestamps: bool) -> zip::DateTime {
+    if strip_timestamps {
+        return zip::DateTime::default();
+    }
+
+    let Ok(modified) = metadata.modified() else {
+        return zip::DateTime::default();
+    };
+    let dt = OffsetDateTime::from(modified);
+    zip::DateTime::try_from(dt).unwrap_or_default()
+}
 
 impl CompressionFormat for ZipFormat {
     fn compress(
@@ -58,6 +73,7 @@ impl CompressionFormat for ZipFormat {
                     input_path.display()
                 )
             })?;
+            let zip_time = zip_last_modified(&metadata, options.strip_timestamps);
             let permissions = if options.normalize_permissions {
                 0o644
             } else {
@@ -70,7 +86,9 @@ impl CompressionFormat for ZipFormat {
                     0o644
                 }
             };
-            let current_file_options = base_file_options.unix_permissions(permissions);
+            let current_file_options = base_file_options
+                .last_modified_time(zip_time)
+                .unix_permissions(permissions);
 
             let filename_os = input_path.file_name().ok_or_else(|| {
                 anyhow::anyhow!(
@@ -121,6 +139,7 @@ impl CompressionFormat for ZipFormat {
                 let path_str = relative_path.to_string_lossy();
 
                 let metadata = entry.metadata()?;
+                let zip_time = zip_last_modified(&metadata, options.strip_timestamps);
                 let permissions = if options.normalize_permissions {
                     0o644
                 } else {
@@ -133,7 +152,9 @@ impl CompressionFormat for ZipFormat {
                         0o644
                     }
                 };
-                let current_file_options = base_file_options.unix_permissions(permissions);
+                let current_file_options = base_file_options
+                    .last_modified_time(zip_time)
+                    .unix_permissions(permissions);
 
                 if path.is_file() {
                     zip_writer.start_file(path_str.as_ref(), current_file_options)?;
@@ -161,7 +182,9 @@ impl CompressionFormat for ZipFormat {
                             0o755
                         }
                     };
-                    let current_file_options = base_file_options.unix_permissions(permissions);
+                    let current_file_options = base_file_options
+                        .last_modified_time(zip_time)
+                        .unix_permissions(permissions);
 
                     // Add directory entry with trailing slash
                     let dir_path = format!("{path_str}/");
@@ -214,6 +237,11 @@ impl CompressionFormat for ZipFormat {
             else {
                 continue;
             };
+            let entry_mtime = if options.strip_timestamps || file.is_dir() {
+                None
+            } else {
+                file.last_modified().to_time().ok().map(SystemTime::from)
+            };
 
             // Show verbose output for individual files
             if let Some(progress) = progress {
@@ -235,6 +263,12 @@ impl CompressionFormat for ZipFormat {
             } else {
                 let mut output_file = File::create(&target_path)?;
                 std::io::copy(&mut file, &mut output_file)?;
+                drop(output_file);
+
+                if let Some(mtime) = entry_mtime {
+                    let file_time = FileTime::from_system_time(mtime);
+                    filetime::set_file_mtime(&target_path, file_time)?;
+                }
             }
 
             // Update progress
