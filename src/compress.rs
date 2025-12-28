@@ -7,7 +7,8 @@ use crate::formats::{
 };
 use crate::progress::Progress;
 use crate::Result;
-use std::path::Path;
+use anyhow::Context;
+use std::path::{Path, PathBuf};
 
 /// compress a file or directory using specified or auto-detected format
 pub fn compress(
@@ -31,6 +32,8 @@ pub fn compress(
     let format = format_override
         .map(Ok)
         .unwrap_or_else(|| detect_output_format(output_path))?;
+
+    ensure_output_outside_input(input_path, output_path)?;
 
     if verbose {
         println!("using {} format", format.name());
@@ -81,6 +84,61 @@ pub fn compress(
     }
 
     Ok(stats)
+}
+
+fn ensure_output_outside_input(input_path: &Path, output_path: &Path) -> Result<()> {
+    let input_abs = std::fs::canonicalize(input_path).with_context(|| {
+        format!(
+            "Failed to resolve input path '{}'",
+            input_path.display()
+        )
+    })?;
+    let output_abs = resolve_absolute_path(output_path)?;
+    let output_resolved = canonicalize_with_fallback(&output_abs);
+
+    if input_path.is_file() {
+        if output_resolved == input_abs {
+            return Err(anyhow::anyhow!(
+                "output path '{}' resolves to input file '{}'",
+                output_path.display(),
+                input_path.display()
+            ));
+        }
+        return Ok(());
+    }
+
+    if output_resolved.starts_with(&input_abs) {
+        return Err(anyhow::anyhow!(
+            "output path '{}' is inside input directory '{}'; choose an output path outside the input tree",
+            output_path.display(),
+            input_path.display()
+        ));
+    }
+
+    Ok(())
+}
+
+fn resolve_absolute_path(path: &Path) -> Result<PathBuf> {
+    if path.is_absolute() {
+        Ok(path.to_path_buf())
+    } else {
+        let cwd = std::env::current_dir().context("Failed to resolve current directory")?;
+        Ok(cwd.join(path))
+    }
+}
+
+fn canonicalize_with_fallback(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| {
+        if let Some(parent) = path.parent() {
+            if let Ok(parent_canon) = std::fs::canonicalize(parent) {
+                if let Some(name) = path.file_name() {
+                    return parent_canon.join(name);
+                }
+                return parent_canon;
+            }
+        }
+        path.to_path_buf()
+    })
 }
 
 /// Detect compression format from output file extension

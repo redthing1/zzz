@@ -183,6 +183,25 @@ fn test_compress_directory() -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn test_compress_output_inside_input_rejected() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+    let source_dir = temp_dir.path().join("input_dir");
+    fs::create_dir(&source_dir)?;
+    fs::write(source_dir.join("file.txt"), "content")?;
+    let output_file = source_dir.join("output.zst");
+
+    zzz_cmd()
+        .args(["compress", "-o"])
+        .arg(&output_file)
+        .arg(&source_dir)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("inside input directory"));
+
+    Ok(())
+}
+
 #[cfg(unix)]
 #[test]
 fn test_compress_follow_symlinks_cli() -> Result<()> {
