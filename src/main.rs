@@ -28,6 +28,10 @@ fn run(cli: Cli) -> zzz_arc::Result<()> {
             progress,
             mut exclude,
             keep_xattrs,
+            keep_permissions,
+            keep_ownership,
+            follow_symlinks,
+            allow_symlink_escape,
             redact,
             strip_timestamps,
             no_default_excludes,
@@ -35,6 +39,12 @@ fn run(cli: Cli) -> zzz_arc::Result<()> {
             password,
         } => {
             let output_path = Cli::get_output_path(&input, output, format);
+
+            if allow_symlink_escape && !follow_symlinks {
+                return Err(anyhow::anyhow!(
+                    "--allow-symlink-escape requires --follow-symlinks"
+                ));
+            }
 
             // check if output already exists and prompt user
             if output_path.exists() {
@@ -52,12 +62,17 @@ fn run(cli: Cli) -> zzz_arc::Result<()> {
                 level,
                 threads: cli.threads,
                 password,
+                normalize_permissions: !keep_permissions,
+                normalize_ownership: !keep_ownership,
                 strip_xattrs: !keep_xattrs,
                 strip_timestamps,
+                follow_symlinks,
+                allow_symlink_escape,
                 ..Default::default()
             };
             if redact {
                 options.normalize_permissions = true;
+                options.normalize_ownership = true;
                 options.strip_xattrs = true;
                 options.strip_timestamps = true;
                 options.deterministic = true;
@@ -98,6 +113,8 @@ fn run(cli: Cli) -> zzz_arc::Result<()> {
             strip_components,
             keep_xattrs,
             strip_timestamps,
+            keep_permissions,
+            keep_ownership,
             overwrite,
             password,
         } => {
@@ -108,6 +125,8 @@ fn run(cli: Cli) -> zzz_arc::Result<()> {
                 strip_components,
                 strip_xattrs: !keep_xattrs,
                 strip_timestamps,
+                preserve_permissions: keep_permissions,
+                preserve_ownership: keep_ownership,
                 password,
             };
 

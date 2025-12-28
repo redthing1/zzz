@@ -46,9 +46,12 @@ pub struct ArchiveEntry {
 pub struct CompressionOptions {
     pub level: i32,                  // 1-22, default 19
     pub threads: u32,                // 0 = auto-detect CPU cores
-    pub normalize_permissions: bool, // security: normalize permissions/ownership
+    pub normalize_permissions: bool, // security: normalize permissions
+    pub normalize_ownership: bool,   // security: normalize ownership (uid/gid)
     pub strip_xattrs: bool,          // security: strip extended attributes (xattrs)
     pub strip_timestamps: bool,      // security: strip filesystem timestamps
+    pub follow_symlinks: bool,       // follow symlinks when walking input
+    pub allow_symlink_escape: bool,  // allow symlink targets outside input root
     pub deterministic: bool,         // sort files for reproducible archives
     pub password: Option<String>,
 }
@@ -59,8 +62,11 @@ impl Default for CompressionOptions {
             level: 19,
             threads: 0, // auto-detect
             normalize_permissions: true,
+            normalize_ownership: true,
             strip_xattrs: true,
             strip_timestamps: false,
+            follow_symlinks: false,
+            allow_symlink_escape: false,
             deterministic: true,
             password: None,
         }
@@ -74,6 +80,8 @@ pub struct ExtractionOptions {
     pub strip_components: usize,
     pub strip_xattrs: bool,
     pub strip_timestamps: bool,
+    pub preserve_permissions: bool,
+    pub preserve_ownership: bool,
     pub password: Option<String>,
 }
 
@@ -84,6 +92,8 @@ impl Default for ExtractionOptions {
             strip_components: 0,
             strip_xattrs: true,
             strip_timestamps: false,
+            preserve_permissions: false,
+            preserve_ownership: false,
             password: None,
         }
     }

@@ -9,7 +9,6 @@ use crate::{
     utils, Result,
 };
 use anyhow::Context;
-use filetime::FileTime;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::{
@@ -43,7 +42,12 @@ impl CompressionFormat for ZipFormat {
         filter: &FileFilter,
         progress: Option<&Progress>,
     ) -> Result<CompressionStats> {
-        let input_size = utils::calculate_directory_size(input_path, filter)?;
+        let input_size = utils::calculate_directory_size(
+            input_path,
+            filter,
+            options.follow_symlinks,
+            options.allow_symlink_escape,
+        )?;
 
         let output_file = File::create(output_path)
             .with_context(|| format!("Failed to create output file {}", output_path.display()))?;
@@ -121,10 +125,31 @@ impl CompressionFormat for ZipFormat {
             }
 
             let base_path = input_path.parent().unwrap_or(input_path);
+            let canonical_root = if options.follow_symlinks && !options.allow_symlink_escape {
+                Some(std::fs::canonicalize(input_path).with_context(|| {
+                    format!("Failed to resolve input root '{}'", input_path.display())
+                })?)
+            } else {
+                None
+            };
             let mut entries: Vec<_> = filter
-                .walk_entries(input_path)
-                .filter_map(|entry| entry.ok())
-                .collect();
+                .walk_entries_with_follow(input_path, options.follow_symlinks)
+                .map(|entry| {
+                    let entry = entry?;
+                    if entry.path_is_symlink() {
+                        if !options.follow_symlinks {
+                            return Err(anyhow::anyhow!(
+                                "symlink '{}' is not supported for archiving (use --follow-symlinks to include targets)",
+                                entry.path().display()
+                            ));
+                        }
+                        if let Some(root) = &canonical_root {
+                            utils::ensure_symlink_within_root(root, entry.path())?;
+                        }
+                    }
+                    Ok(entry)
+                })
+                .collect::<std::result::Result<Vec<_>, _>>()?;
 
             // Sort for deterministic archives
             if options.deterministic {
@@ -136,7 +161,7 @@ impl CompressionFormat for ZipFormat {
             for entry in entries {
                 let path = entry.path();
                 let relative_path = path.strip_prefix(base_path)?;
-                let path_str = relative_path.to_string_lossy();
+                let path_str = utils::normalize_archive_path(relative_path);
 
                 let metadata = entry.metadata()?;
                 let zip_time = zip_last_modified(&metadata, options.strip_timestamps);
@@ -157,7 +182,7 @@ impl CompressionFormat for ZipFormat {
                     .unix_permissions(permissions);
 
                 if path.is_file() {
-                    zip_writer.start_file(path_str.as_ref(), current_file_options)?;
+                    zip_writer.start_file(path_str.as_str(), current_file_options)?;
 
                     let mut file = File::open(path).with_context(|| {
                         format!("Failed to open file for archiving {}", path.display())
@@ -242,6 +267,11 @@ impl CompressionFormat for ZipFormat {
             } else {
                 file.last_modified().to_time().ok().map(SystemTime::from)
             };
+            let entry_mode = if options.preserve_permissions {
+                file.unix_mode()
+            } else {
+                None
+            };
 
             // Show verbose output for individual files
             if let Some(progress) = progress {
@@ -260,14 +290,20 @@ impl CompressionFormat for ZipFormat {
 
             if file.is_dir() {
                 std::fs::create_dir_all(&target_path)?;
+                if let Some(mode) = entry_mode {
+                    utils::apply_permissions(&target_path, mode)?;
+                }
             } else {
                 let mut output_file = File::create(&target_path)?;
                 std::io::copy(&mut file, &mut output_file)?;
                 drop(output_file);
 
+                if let Some(mode) = entry_mode {
+                    utils::apply_permissions(&target_path, mode)?;
+                }
+
                 if let Some(mtime) = entry_mtime {
-                    let file_time = FileTime::from_system_time(mtime);
-                    filetime::set_file_mtime(&target_path, file_time)?;
+                    utils::apply_mtime(&target_path, mtime)?;
                 }
             }
 

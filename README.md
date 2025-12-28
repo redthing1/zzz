@@ -47,4 +47,6 @@ Notes:
 
 - raw `.gz`/`.xz` outputs are treated as single-file streams; use `.tgz`/`.txz` (or `.tar.gz`/`.tar.xz`) for tarballs.
 - `--strip-components` drops leading path segments during extraction.
-- archives strip ownership and xattrs by default; use `--keep-xattrs` to preserve, `--strip-timestamps` for timestamps only, or `--redact` to strip metadata and exclude common secrets.
+- archives strip ownership and xattrs by default; use `--keep-ownership` (tar-based) and `--keep-xattrs` to preserve, `--keep-permissions` (tar/zip) for modes, `--strip-timestamps` for timestamps only, or `--redact` to strip metadata and exclude common secrets.
+- extraction preserves xattrs, permissions, and ownership only when explicitly requested via `--keep-xattrs`, `--keep-permissions`, and `--keep-ownership`.
+- symlinks are rejected by default during compression; use `--follow-symlinks` to archive target contents. Use `--allow-symlink-escape` (with `--follow-symlinks`) to include targets outside the input tree.

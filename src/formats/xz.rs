@@ -54,7 +54,12 @@ impl CompressionFormat for XzFormat {
         filter: &FileFilter,
         progress: Option<&Progress>,
     ) -> Result<CompressionStats> {
-        let input_size = utils::calculate_directory_size(input_path, filter)?;
+        let input_size = utils::calculate_directory_size(
+            input_path,
+            filter,
+            options.follow_symlinks,
+            options.allow_symlink_escape,
+        )?;
 
         // Map compression level (1-22) to xz level (0-9)
         let xz_level = (((options.level as f32 / 22.0) * 9.0) as u32).clamp(0, 9);
@@ -103,7 +108,7 @@ impl CompressionFormat for XzFormat {
                     filter,
                     progress,
                     tarball::BuildOptions {
-                        normalize_ownership: options.normalize_permissions,
+                        normalize_ownership: options.normalize_ownership,
                         apply_filter_to_single_file: true,
                         directory_slash: false,
                         set_mtime_for_single_file: true,
@@ -130,7 +135,7 @@ impl CompressionFormat for XzFormat {
                 filter,
                 progress,
                 tarball::BuildOptions {
-                    normalize_ownership: options.normalize_permissions,
+                    normalize_ownership: options.normalize_ownership,
                     apply_filter_to_single_file: true,
                     directory_slash: false,
                     set_mtime_for_single_file: true,

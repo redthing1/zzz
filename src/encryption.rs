@@ -38,6 +38,8 @@ pub const ENCRYPTION_HEADER_SIZE: usize = ENCRYPTED_ZSTD_MAGIC.len() + ARGON2_SA
 
 // Default chunk size for encryption (plaintext)
 pub const DEFAULT_ENCRYPTION_CHUNK_SIZE: usize = 64 * 1024;
+// Guardrail for corrupted ciphertext length fields (ciphertext + tag).
+pub const MAX_ENCRYPTED_CHUNK_LEN: usize = DEFAULT_ENCRYPTION_CHUNK_SIZE * 16 + TAG_SIZE;
 
 /// Derive an AES-256 key from a password using Argon2id
 ///
@@ -258,6 +260,13 @@ impl<R: Read> DecryptingReader<R> {
                 TAG_SIZE
             );
         }
+        if ct_with_tag_len > MAX_ENCRYPTED_CHUNK_LEN {
+            bail!(
+                "Invalid ciphertext length: {} (exceeds max {})",
+                ct_with_tag_len,
+                MAX_ENCRYPTED_CHUNK_LEN
+            );
+        }
 
         // Read ciphertext with tag
         let mut ciphertext_with_tag = vec![0u8; ct_with_tag_len];
@@ -428,6 +437,21 @@ mod tests {
                     || e.to_string().contains("Decryption error")
             );
         }
+        Ok(())
+    }
+
+    #[test]
+    fn test_decrypting_reader_rejects_large_chunk_len() -> Result<()> {
+        let key = [0u8; AES_KEY_SIZE];
+        let mut encrypted = Vec::new();
+        encrypted.extend_from_slice(&[0u8; NONCE_SIZE]);
+        let oversize = (MAX_ENCRYPTED_CHUNK_LEN + 1) as u32;
+        encrypted.extend_from_slice(&oversize.to_be_bytes());
+
+        let mut reader = DecryptingReader::new(Cursor::new(encrypted), &key)?;
+        let mut out = Vec::new();
+        let err = reader.read_to_end(&mut out).unwrap_err();
+        assert!(err.to_string().contains("Invalid ciphertext length"));
         Ok(())
     }
 }

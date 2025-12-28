@@ -47,7 +47,29 @@ fn test_compress_help() {
         .stdout(predicate::str::contains("--level"))
         .stdout(predicate::str::contains("--output"))
         .stdout(predicate::str::contains("--progress"))
-        .stdout(predicate::str::contains("--exclude"));
+        .stdout(predicate::str::contains("--exclude"))
+        .stdout(predicate::str::contains("--keep-xattrs"))
+        .stdout(predicate::str::contains("--keep-permissions"))
+        .stdout(predicate::str::contains("--keep-ownership"))
+        .stdout(predicate::str::contains("--follow-symlinks"))
+        .stdout(predicate::str::contains("--allow-symlink-escape"))
+        .stdout(predicate::str::contains("--redact"))
+        .stdout(predicate::str::contains("--strip-timestamps"));
+}
+
+#[test]
+fn test_extract_help() {
+    zzz_cmd()
+        .args(["extract", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("extract archives"))
+        .stdout(predicate::str::contains("--strip-components"))
+        .stdout(predicate::str::contains("--keep-xattrs"))
+        .stdout(predicate::str::contains("--keep-permissions"))
+        .stdout(predicate::str::contains("--keep-ownership"))
+        .stdout(predicate::str::contains("--strip-timestamps"))
+        .stdout(predicate::str::contains("--overwrite"));
 }
 
 #[test]
@@ -159,6 +181,46 @@ fn test_compress_directory() -> Result<()> {
     assert!(output_file.exists());
 
     Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn test_compress_follow_symlinks_cli() -> Result<()> {
+    use std::os::unix::fs::symlink;
+
+    let temp_dir = TempDir::new()?;
+    let source_dir = temp_dir.path().join("source");
+    let output_file = temp_dir.path().join("archive.zst");
+
+    fs::create_dir(&source_dir)?;
+    let target = source_dir.join("target.txt");
+    fs::write(&target, "symlink content")?;
+    symlink(&target, source_dir.join("link.txt"))?;
+
+    zzz_cmd()
+        .args(["compress", "--follow-symlinks", "-o"])
+        .arg(&output_file)
+        .arg(&source_dir)
+        .assert()
+        .success();
+
+    zzz_cmd()
+        .args(["list"])
+        .arg(&output_file)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("link.txt"));
+
+    Ok(())
+}
+
+#[test]
+fn test_compress_allow_symlink_escape_requires_follow() {
+    zzz_cmd()
+        .args(["compress", "--allow-symlink-escape", "dummy.txt"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("requires --follow-symlinks"));
 }
 
 #[test]

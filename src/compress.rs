@@ -37,8 +37,13 @@ pub fn compress(
     }
 
     // calculate total size for progress tracking
-    let total_size = crate::utils::calculate_directory_size(input_path, &filter)?;
-    let progress = Progress::new(show_progress, total_size);
+    let total_size = crate::utils::calculate_directory_size(
+        input_path,
+        &filter,
+        options.follow_symlinks,
+        options.allow_symlink_escape,
+    )?;
+    let progress = Progress::new(show_progress, total_size, verbose);
 
     // dispatch to appropriate format implementation
     let stats = match format {

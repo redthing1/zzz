@@ -28,7 +28,12 @@ impl CompressionFormat for ZstdFormat {
         progress: Option<&Progress>,
     ) -> Result<CompressionStats> {
         // calculate input size for progress and stats
-        let input_size = crate::utils::calculate_directory_size(input_path, filter)?;
+        let input_size = crate::utils::calculate_directory_size(
+            input_path,
+            filter,
+            options.follow_symlinks,
+            options.allow_symlink_escape,
+        )?;
 
         // create output file
         let mut underlying_file = File::create(output_path)
@@ -63,7 +68,7 @@ impl CompressionFormat for ZstdFormat {
         };
 
         let build_options = tarball::BuildOptions {
-            normalize_ownership: options.normalize_permissions,
+            normalize_ownership: options.normalize_ownership,
             apply_filter_to_single_file: true,
             directory_slash: true,
             set_mtime_for_single_file: true,

@@ -325,6 +325,130 @@ fn test_extract_rejects_symlink_ancestor() -> Result<()> {
     Ok(())
 }
 
+#[cfg(unix)]
+#[test]
+fn test_compress_rejects_symlink() -> Result<()> {
+    use std::os::unix::fs::symlink;
+
+    let temp_dir = TempDir::new()?;
+    let source_dir = temp_dir.path().join("source");
+    let archive_path = temp_dir.path().join("archive.zst");
+
+    fs::create_dir(&source_dir)?;
+    fs::write(source_dir.join("file.txt"), "content")?;
+    symlink(source_dir.join("file.txt"), source_dir.join("link.txt"))?;
+
+    let options = CompressionOptions::default();
+    let filter = FileFilter::new(true, &[])?;
+    let result = ZstdFormat::compress(&source_dir, &archive_path, &options, &filter, None);
+
+    assert!(result.is_err());
+    let error_msg = result.unwrap_err().to_string();
+    assert!(error_msg.contains("symlink"));
+
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn test_compress_follow_symlink() -> Result<()> {
+    use std::os::unix::fs::symlink;
+
+    let temp_dir = TempDir::new()?;
+    let source_dir = temp_dir.path().join("source");
+    let archive_path = temp_dir.path().join("archive.zst");
+    let extract_dir = temp_dir.path().join("extract");
+
+    fs::create_dir(&source_dir)?;
+    let target = source_dir.join("target.txt");
+    fs::write(&target, "symlink content")?;
+    symlink(&target, source_dir.join("link.txt"))?;
+
+    let options = CompressionOptions {
+        follow_symlinks: true,
+        ..Default::default()
+    };
+    let filter = FileFilter::new(true, &[])?;
+    let stats = ZstdFormat::compress(&source_dir, &archive_path, &options, &filter, None)?;
+    assert!(stats.output_size > 0);
+
+    fs::create_dir(&extract_dir)?;
+    let extract_options = ExtractionOptions::default();
+    ZstdFormat::extract(&archive_path, &extract_dir, &extract_options, None)?;
+
+    let linked_path = extract_dir.join("source/link.txt");
+    assert!(linked_path.exists());
+    assert_eq!(fs::read_to_string(&linked_path)?, "symlink content");
+
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn test_compress_follow_symlink_escape_rejected() -> Result<()> {
+    use std::os::unix::fs::symlink;
+
+    let temp_dir = TempDir::new()?;
+    let source_dir = temp_dir.path().join("source");
+    let outside_dir = temp_dir.path().join("outside");
+    let archive_path = temp_dir.path().join("archive.zst");
+
+    fs::create_dir(&source_dir)?;
+    fs::create_dir(&outside_dir)?;
+    let outside_file = outside_dir.join("outside.txt");
+    fs::write(&outside_file, "outside content")?;
+    symlink(&outside_file, source_dir.join("link.txt"))?;
+
+    let options = CompressionOptions {
+        follow_symlinks: true,
+        ..Default::default()
+    };
+    let filter = FileFilter::new(true, &[])?;
+    let result = ZstdFormat::compress(&source_dir, &archive_path, &options, &filter, None);
+
+    assert!(result.is_err());
+    let error_msg = result.unwrap_err().to_string();
+    assert!(error_msg.contains("escapes input root"));
+
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn test_compress_follow_symlink_escape_allowed() -> Result<()> {
+    use std::os::unix::fs::symlink;
+
+    let temp_dir = TempDir::new()?;
+    let source_dir = temp_dir.path().join("source");
+    let outside_dir = temp_dir.path().join("outside");
+    let archive_path = temp_dir.path().join("archive.zst");
+    let extract_dir = temp_dir.path().join("extract");
+
+    fs::create_dir(&source_dir)?;
+    fs::create_dir(&outside_dir)?;
+    let outside_file = outside_dir.join("outside.txt");
+    fs::write(&outside_file, "outside content")?;
+    symlink(&outside_file, source_dir.join("link.txt"))?;
+
+    let options = CompressionOptions {
+        follow_symlinks: true,
+        allow_symlink_escape: true,
+        ..Default::default()
+    };
+    let filter = FileFilter::new(true, &[])?;
+    ZstdFormat::compress(&source_dir, &archive_path, &options, &filter, None)?;
+
+    fs::create_dir(&extract_dir)?;
+    let extract_options = ExtractionOptions::default();
+    ZstdFormat::extract(&archive_path, &extract_dir, &extract_options, None)?;
+
+    let linked_path = extract_dir.join("source/link.txt");
+    assert!(linked_path.exists());
+    assert_eq!(fs::read_to_string(&linked_path)?, "outside content");
+
+    Ok(())
+}
+
 #[test]
 fn test_empty_directory_handling() -> Result<()> {
     let temp_dir = TempDir::new()?;

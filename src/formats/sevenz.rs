@@ -9,7 +9,6 @@ use crate::{
     utils, Result,
 };
 use anyhow::Context;
-use filetime::FileTime;
 use sevenz_rust::{Password, SevenZArchiveEntry, SevenZReader, SevenZWriter};
 use std::{fs::File, path::Path};
 
@@ -31,7 +30,12 @@ impl CompressionFormat for SevenZFormat {
         filter: &FileFilter,
         progress: Option<&Progress>,
     ) -> Result<CompressionStats> {
-        let input_size = utils::calculate_directory_size(input_path, filter)?;
+        let input_size = utils::calculate_directory_size(
+            input_path,
+            filter,
+            options.follow_symlinks,
+            options.allow_symlink_escape,
+        )?;
 
         let mut sz = SevenZWriter::create(output_path).with_context(|| {
             format!(
@@ -94,10 +98,31 @@ impl CompressionFormat for SevenZFormat {
         } else {
             // Directory compression - preserve directory structure like our other formats
             let base_path = input_path.parent().unwrap_or(input_path);
+            let canonical_root = if options.follow_symlinks && !options.allow_symlink_escape {
+                Some(std::fs::canonicalize(input_path).with_context(|| {
+                    format!("Failed to resolve input root '{}'", input_path.display())
+                })?)
+            } else {
+                None
+            };
             let mut entries: Vec<_> = filter
-                .walk_entries(input_path)
-                .filter_map(|entry| entry.ok())
-                .collect();
+                .walk_entries_with_follow(input_path, options.follow_symlinks)
+                .map(|entry| {
+                    let entry = entry?;
+                    if entry.path_is_symlink() {
+                        if !options.follow_symlinks {
+                            return Err(anyhow::anyhow!(
+                                "symlink '{}' is not supported for archiving (use --follow-symlinks to include targets)",
+                                entry.path().display()
+                            ));
+                        }
+                        if let Some(root) = &canonical_root {
+                            utils::ensure_symlink_within_root(root, entry.path())?;
+                        }
+                    }
+                    Ok(entry)
+                })
+                .collect::<std::result::Result<Vec<_>, _>>()?;
 
             // Sort for deterministic archives
             if options.deterministic {
@@ -239,8 +264,8 @@ impl CompressionFormat for SevenZFormat {
 
                 if !options.strip_timestamps && entry.has_last_modified_date {
                     let system_time = std::time::SystemTime::from(entry.last_modified_date);
-                    let file_time = FileTime::from_system_time(system_time);
-                    filetime::set_file_mtime(&target_path, file_time)?;
+                    utils::apply_mtime(&target_path, system_time)
+                        .map_err(|e| std::io::Error::other(e.to_string()))?;
                 }
             }
 

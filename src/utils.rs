@@ -1,7 +1,10 @@
 //! utility functions for file size calculations and formatting
 
 use crate::Result;
+use anyhow::Context;
+use filetime::FileTime;
 use std::path::Path;
+use std::time::SystemTime;
 
 /// sanitize an archive entry path and apply strip_components
 pub fn sanitize_archive_entry_path(
@@ -35,6 +38,71 @@ pub fn sanitize_archive_entry_path(
     }
 
     Ok(Some(sanitized))
+}
+
+/// normalize archive entry path separators to '/' on Windows
+pub fn normalize_archive_path(path: &Path) -> String {
+    let path_str = path.to_string_lossy().to_string();
+    if cfg!(windows) {
+        path_str.replace('\\', "/")
+    } else {
+        path_str
+    }
+}
+
+fn resolve_symlink_target(link_path: &Path) -> Result<std::path::PathBuf> {
+    let target = std::fs::read_link(link_path).with_context(|| {
+        format!(
+            "Failed to read symlink target for '{}'",
+            link_path.display()
+        )
+    })?;
+    let resolved = if target.is_absolute() {
+        target
+    } else {
+        let parent = link_path.parent().unwrap_or_else(|| Path::new("."));
+        parent.join(target)
+    };
+    std::fs::canonicalize(&resolved).with_context(|| {
+        format!(
+            "Failed to resolve symlink target for '{}'",
+            link_path.display()
+        )
+    })
+}
+
+pub fn ensure_symlink_within_root(root: &Path, link_path: &Path) -> Result<()> {
+    let target = resolve_symlink_target(link_path)?;
+    if !target.starts_with(root) {
+        return Err(anyhow::anyhow!(
+            "symlink '{}' escapes input root '{}' (use --allow-symlink-escape to include targets outside)",
+            link_path.display(),
+            root.display()
+        ));
+    }
+    Ok(())
+}
+
+pub fn apply_mtime(path: &Path, system_time: SystemTime) -> Result<()> {
+    let file_time = FileTime::from_system_time(system_time);
+    filetime::set_file_mtime(path, file_time)
+        .with_context(|| format!("Failed to set modification time for '{}'", path.display()))?;
+    Ok(())
+}
+
+#[cfg(unix)]
+pub fn apply_permissions(path: &Path, mode: u32) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let permissions = std::fs::Permissions::from_mode(mode & 0o7777);
+    std::fs::set_permissions(path, permissions)
+        .with_context(|| format!("Failed to set permissions for '{}'", path.display()))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+pub fn apply_permissions(_path: &Path, _mode: u32) -> Result<()> {
+    Ok(())
 }
 
 /// ensure no symlink exists in the target path's ancestor chain under root
@@ -146,8 +214,34 @@ pub fn calculate_dir_size(path: &Path) -> Result<u64> {
 }
 
 /// calculate total size of a directory with file filtering
-pub fn calculate_directory_size(path: &Path, filter: &crate::filter::FileFilter) -> Result<u64> {
+pub fn calculate_directory_size(
+    path: &Path,
+    filter: &crate::filter::FileFilter,
+    follow_symlinks: bool,
+    allow_symlink_escape: bool,
+) -> Result<u64> {
     let mut total = 0;
+    let canonical_root = if follow_symlinks && !allow_symlink_escape {
+        Some(
+            std::fs::canonicalize(path)
+                .with_context(|| format!("Failed to resolve input root '{}'", path.display()))?,
+        )
+    } else {
+        None
+    };
+
+    let metadata = std::fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() {
+        if !follow_symlinks {
+            return Err(anyhow::anyhow!(
+                "symlink '{}' is not supported for archiving (use --follow-symlinks to include targets)",
+                path.display()
+            ));
+        }
+        if let Some(root) = &canonical_root {
+            ensure_symlink_within_root(root, path)?;
+        }
+    }
 
     if path.is_file() {
         if let Some(filename) = path.file_name() {
@@ -158,8 +252,19 @@ pub fn calculate_directory_size(path: &Path, filter: &crate::filter::FileFilter)
         return Ok(path.metadata()?.len());
     }
 
-    for entry in filter.walk_entries(path) {
+    for entry in filter.walk_entries_with_follow(path, follow_symlinks) {
         let entry = entry?;
+        if entry.path_is_symlink() {
+            if !follow_symlinks {
+                return Err(anyhow::anyhow!(
+                    "symlink '{}' is not supported for archiving (use --follow-symlinks to include targets)",
+                    entry.path().display()
+                ));
+            }
+            if let Some(root) = &canonical_root {
+                ensure_symlink_within_root(root, entry.path())?;
+            }
+        }
         if entry.file_type().is_file() {
             total += entry.metadata()?.len();
         }
@@ -218,6 +323,20 @@ mod tests {
         assert_eq!(format_bytes(1024 * 1024 * 1024), "1.00 GiB");
         assert_eq!(format_bytes(1024_u64.pow(4)), "1.00 TiB");
         assert_eq!(format_bytes(1024_u64.pow(5)), "1024.00 TiB");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn test_normalize_archive_path_windows() {
+        let path = Path::new(r"dir\file.txt");
+        assert_eq!(normalize_archive_path(path), "dir/file.txt");
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn test_normalize_archive_path_non_windows() {
+        let path = Path::new("dir\\file.txt");
+        assert_eq!(normalize_archive_path(path), "dir\\file.txt");
     }
 
     #[test]

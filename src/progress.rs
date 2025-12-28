@@ -9,10 +9,11 @@ const PROGRESS_ITEMS_TEMPLATE: &str =
 
 pub struct Progress {
     bar: Option<ProgressBar>,
+    verbose: bool,
 }
 
 impl Progress {
-    fn new_with_template(enabled: bool, total: u64, template: &str) -> Self {
+    fn new_with_template(enabled: bool, total: u64, template: &str, verbose: bool) -> Self {
         let bar = if enabled {
             let pb = ProgressBar::new(total);
             pb.set_style(
@@ -26,17 +27,17 @@ impl Progress {
             None
         };
 
-        Self { bar }
+        Self { bar, verbose }
     }
 
     /// create new byte-based progress reporter, only shows progress if enabled
-    pub fn new(enabled: bool, total_bytes: u64) -> Self {
-        Self::new_with_template(enabled, total_bytes, PROGRESS_BYTES_TEMPLATE)
+    pub fn new(enabled: bool, total_bytes: u64, verbose: bool) -> Self {
+        Self::new_with_template(enabled, total_bytes, PROGRESS_BYTES_TEMPLATE, verbose)
     }
 
     /// create new item-count progress reporter, only shows progress if enabled
-    pub fn new_items(enabled: bool, total_items: u64) -> Self {
-        Self::new_with_template(enabled, total_items, PROGRESS_ITEMS_TEMPLATE)
+    pub fn new_items(enabled: bool, total_items: u64, verbose: bool) -> Self {
+        Self::new_with_template(enabled, total_items, PROGRESS_ITEMS_TEMPLATE, verbose)
     }
 
     /// update progress with current bytes processed
@@ -74,9 +75,9 @@ impl Progress {
         }
     }
 
-    /// check if verbose mode is enabled (progress bar exists)
+    /// check if verbose logging is enabled
     pub fn is_verbose(&self) -> bool {
-        self.bar.is_some()
+        self.verbose
     }
 }
 
@@ -86,7 +87,7 @@ mod tests {
 
     #[test]
     fn test_progress_disabled() {
-        let progress = Progress::new(false, 1000);
+        let progress = Progress::new(false, 1000, false);
 
         // Should not panic when progress is disabled
         progress.update(500);
@@ -99,7 +100,7 @@ mod tests {
 
     #[test]
     fn test_progress_enabled() {
-        let progress = Progress::new(true, 1000);
+        let progress = Progress::new(true, 1000, false);
 
         // Progress bar should exist when enabled
         assert!(progress.bar.is_some());
@@ -112,7 +113,7 @@ mod tests {
 
     #[test]
     fn test_progress_zero_total() {
-        let progress = Progress::new(true, 0);
+        let progress = Progress::new(true, 0, false);
 
         // Should handle zero total bytes without panic
         progress.update(0);
@@ -121,7 +122,7 @@ mod tests {
 
     #[test]
     fn test_progress_update_beyond_total() {
-        let progress = Progress::new(true, 100);
+        let progress = Progress::new(true, 100, false);
 
         // Should handle updates beyond total without panic
         progress.update(150);
@@ -131,11 +132,18 @@ mod tests {
     #[test]
     fn test_progress_is_verbose() {
         // Enabled progress should be verbose
-        let progress_enabled = Progress::new(true, 1000);
+        let progress_enabled = Progress::new(true, 1000, true);
         assert!(progress_enabled.is_verbose());
 
         // Disabled progress should not be verbose
-        let progress_disabled = Progress::new(false, 1000);
+        let progress_disabled = Progress::new(false, 1000, false);
         assert!(!progress_disabled.is_verbose());
+    }
+
+    #[test]
+    fn test_progress_verbose_without_bar() {
+        let progress = Progress::new(false, 1000, true);
+        assert!(progress.is_verbose());
+        assert!(progress.bar.is_none());
     }
 }

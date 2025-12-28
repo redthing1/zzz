@@ -48,7 +48,23 @@ pub enum Commands {
         #[arg(long)]
         keep_xattrs: bool,
 
-        /// strip timestamps, ownership, and xattrs, and exclude common secrets (overrides keep flags)
+        /// preserve original file permissions in archive entries
+        #[arg(long)]
+        keep_permissions: bool,
+
+        /// preserve ownership (uid/gid) in tar-based archives
+        #[arg(long)]
+        keep_ownership: bool,
+
+        /// follow symlinks and archive target contents (may include files outside input)
+        #[arg(long)]
+        follow_symlinks: bool,
+
+        /// allow symlink targets outside the input root (requires --follow-symlinks)
+        #[arg(long)]
+        allow_symlink_escape: bool,
+
+        /// strip timestamps and xattrs, normalize ownership/permissions, and exclude common secrets (overrides keep flags)
         #[arg(long)]
         redact: bool,
 
@@ -96,6 +112,14 @@ pub enum Commands {
         /// strip filesystem timestamps when extracting tar-based archives
         #[arg(long)]
         strip_timestamps: bool,
+
+        /// preserve file permissions when extracting
+        #[arg(long)]
+        keep_permissions: bool,
+
+        /// preserve ownership (uid/gid) when extracting tar-based archives
+        #[arg(long)]
+        keep_ownership: bool,
 
         /// overwrite existing files
         #[arg(short = 'w', long)]

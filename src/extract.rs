@@ -36,7 +36,7 @@ pub fn extract(
     }
 
     // create progress tracker (enabled when verbose)
-    let progress = Progress::new_items(verbose, 0);
+    let progress = Progress::new_items(verbose, 0, verbose);
 
     // dispatch to appropriate format implementation
     match format {

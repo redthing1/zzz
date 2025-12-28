@@ -47,7 +47,7 @@ fn append_xattrs<W: Write>(builder: &mut Builder<W>, path: &Path) -> Result<()> 
         let Some(value) = value else {
             continue;
         };
-        let key = format!("{}{}", PAX_XATTR_PREFIX, name_str);
+        let key = format!("{PAX_XATTR_PREFIX}{name_str}");
         entries.push((key, value));
     }
 
@@ -166,7 +166,28 @@ pub fn build_tarball<W: Write>(
 
     let mut bytes_processed = 0u64;
 
+    let canonical_root =
+        if options.follow_symlinks && !options.allow_symlink_escape {
+            Some(std::fs::canonicalize(input_path).with_context(|| {
+                format!("Failed to resolve input root '{}'", input_path.display())
+            })?)
+        } else {
+            None
+        };
+
     if input_path.is_file() {
+        let metadata = std::fs::symlink_metadata(input_path)?;
+        if metadata.file_type().is_symlink() {
+            if !options.follow_symlinks {
+                return Err(anyhow::anyhow!(
+                    "symlink '{}' is not supported for archiving (use --follow-symlinks to include targets)",
+                    input_path.display()
+                ));
+            }
+            if let Some(root) = &canonical_root {
+                utils::ensure_symlink_within_root(root, input_path)?;
+            }
+        }
         if build_options.apply_filter_to_single_file {
             if let Some(filename) = input_path.file_name() {
                 if !filter.should_include_relative(Path::new(filename)) {
@@ -215,9 +236,23 @@ pub fn build_tarball<W: Write>(
 
     let root_name = input_path.file_name();
     let mut entries: Vec<_> = filter
-        .walk_entries(input_path)
-        .filter_map(|entry| entry.ok())
-        .collect();
+        .walk_entries_with_follow(input_path, options.follow_symlinks)
+        .map(|entry| {
+            let entry = entry?;
+            if entry.path_is_symlink() {
+                if !options.follow_symlinks {
+                    return Err(anyhow::anyhow!(
+                        "symlink '{}' is not supported for archiving (use --follow-symlinks to include targets)",
+                        entry.path().display()
+                    ));
+                }
+                if let Some(root) = &canonical_root {
+                    utils::ensure_symlink_within_root(root, entry.path())?;
+                }
+            }
+            Ok(entry)
+        })
+        .collect::<std::result::Result<Vec<_>, _>>()?;
 
     if options.deterministic {
         entries.sort_by(|a, b| a.path().cmp(b.path()));
@@ -235,6 +270,7 @@ pub fn build_tarball<W: Write>(
         }
 
         if path.is_file() {
+            let archive_path_str = utils::normalize_archive_path(&archive_path);
             if !options.strip_xattrs {
                 append_xattrs(&mut tar_builder, path)?;
             }
@@ -248,7 +284,7 @@ pub fn build_tarball<W: Write>(
                 build_options.normalize_ownership,
                 !options.strip_timestamps,
             )?;
-            tar_builder.append_data(&mut header, &archive_path, file)?;
+            tar_builder.append_data(&mut header, archive_path_str.as_str(), file)?;
 
             bytes_processed += metadata.len();
             if let Some(progress) = progress {
@@ -259,6 +295,7 @@ pub fn build_tarball<W: Write>(
                 continue;
             }
 
+            let archive_path_str = utils::normalize_archive_path(&archive_path);
             if !options.strip_xattrs {
                 append_xattrs(&mut tar_builder, path)?;
             }
@@ -271,13 +308,17 @@ pub fn build_tarball<W: Write>(
                 !options.strip_timestamps,
             )?;
             if build_options.directory_slash {
-                let mut dir_path = archive_path.to_string_lossy().to_string();
+                let mut dir_path = archive_path_str;
                 if !dir_path.ends_with('/') {
                     dir_path.push('/');
                 }
                 tar_builder.append_data(&mut header, dir_path.as_str(), std::io::empty())?;
             } else {
-                tar_builder.append_data(&mut header, &archive_path, std::io::empty())?;
+                tar_builder.append_data(
+                    &mut header,
+                    archive_path_str.as_str(),
+                    std::io::empty(),
+                )?;
             }
         }
     }
@@ -294,6 +335,8 @@ pub fn extract_tarball<R: Read>(
     let mut archive = Archive::new(reader);
     archive.set_preserve_mtime(!options.strip_timestamps);
     archive.set_unpack_xattrs(!options.strip_xattrs);
+    archive.set_preserve_permissions(options.preserve_permissions);
+    archive.set_preserve_ownerships(options.preserve_ownership);
     std::fs::create_dir_all(output_dir)?;
 
     let mut entry_count = 0u64;

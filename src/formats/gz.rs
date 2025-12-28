@@ -71,7 +71,12 @@ impl CompressionFormat for GzipFormat {
         filter: &FileFilter,
         progress: Option<&Progress>,
     ) -> Result<CompressionStats> {
-        let input_size = utils::calculate_directory_size(input_path, filter)?;
+        let input_size = utils::calculate_directory_size(
+            input_path,
+            filter,
+            options.follow_symlinks,
+            options.allow_symlink_escape,
+        )?;
 
         // Map compression level (1-22) to gzip level (0-9)
         let gzip_level = (((options.level as f32 / 22.0) * 9.0) as u32).clamp(0, 9);
@@ -132,7 +137,7 @@ impl CompressionFormat for GzipFormat {
                     filter,
                     progress,
                     tarball::BuildOptions {
-                        normalize_ownership: options.normalize_permissions,
+                        normalize_ownership: options.normalize_ownership,
                         apply_filter_to_single_file: true,
                         directory_slash: false,
                         set_mtime_for_single_file: true,
@@ -159,7 +164,7 @@ impl CompressionFormat for GzipFormat {
                 filter,
                 progress,
                 tarball::BuildOptions {
-                    normalize_ownership: options.normalize_permissions,
+                    normalize_ownership: options.normalize_ownership,
                     apply_filter_to_single_file: true,
                     directory_slash: false,
                     set_mtime_for_single_file: true,
@@ -206,8 +211,19 @@ impl CompressionFormat for GzipFormat {
                 format!("Failed to open archive file {}", archive_path.display())
             })?;
             let mut decoder = GzDecoder::new(file);
+            let mtime = if options.strip_timestamps {
+                None
+            } else {
+                decoder
+                    .header()
+                    .and_then(|header| header.mtime_as_datetime())
+            };
             let mut output_file = File::create(&target_path)?;
             std::io::copy(&mut decoder, &mut output_file)?;
+            drop(output_file);
+            if let Some(mtime) = mtime {
+                utils::apply_mtime(&target_path, mtime)?;
+            }
             return Ok(());
         }
 

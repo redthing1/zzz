@@ -269,8 +269,17 @@ impl FileFilter {
         &'a self,
         root: &'a Path,
     ) -> impl Iterator<Item = walkdir::Result<walkdir::DirEntry>> + 'a {
+        self.walk_entries_with_follow(root, false)
+    }
+
+    /// walk a directory tree while applying filter pruning, optionally following symlinks
+    pub fn walk_entries_with_follow<'a>(
+        &'a self,
+        root: &'a Path,
+        follow_links: bool,
+    ) -> impl Iterator<Item = walkdir::Result<walkdir::DirEntry>> + 'a {
         WalkDir::new(root)
-            .follow_links(false)
+            .follow_links(follow_links)
             .into_iter()
             .filter_entry(move |entry| self.should_include_path(root, entry.path()))
     }

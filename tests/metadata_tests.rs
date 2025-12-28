@@ -14,6 +14,7 @@ fn zzz_cmd() -> Command {
 struct TarHeaderInfo {
     mtime: u64,
     has_xattr: bool,
+    mode: u32,
     uid: u64,
     gid: u64,
     username: Option<String>,
@@ -34,6 +35,7 @@ fn read_zstd_tar_header_info(path: &Path) -> Result<TarHeaderInfo> {
         .ok_or_else(|| anyhow::anyhow!("missing tar entries"))??;
 
     let mtime = entry.header().mtime()?;
+    let mode = entry.header().mode()?;
     let uid = entry.header().uid()?;
     let gid = entry.header().gid()?;
     let username = entry
@@ -62,6 +64,7 @@ fn read_zstd_tar_header_info(path: &Path) -> Result<TarHeaderInfo> {
     Ok(TarHeaderInfo {
         mtime,
         has_xattr,
+        mode,
         uid,
         gid,
         username,
@@ -111,6 +114,14 @@ fn file_mtime_seconds(path: &Path) -> Result<i64> {
     Ok(mtime.unix_seconds())
 }
 
+#[cfg(unix)]
+fn file_mode_bits(path: &Path) -> Result<u32> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let metadata = fs::metadata(path)?;
+    Ok(metadata.permissions().mode() & 0o7777)
+}
+
 fn zip_entry_mtime_seconds(archive_path: &Path) -> Result<Option<i64>> {
     use std::fs::File;
     use zip::ZipArchive;
@@ -126,6 +137,17 @@ fn zip_entry_mtime_seconds(archive_path: &Path) -> Result<Option<i64>> {
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|e| anyhow::anyhow!("mtime before epoch: {e}"))?;
     Ok(Some(duration.as_secs() as i64))
+}
+
+#[cfg(unix)]
+fn zip_entry_mode(archive_path: &Path) -> Result<Option<u32>> {
+    use std::fs::File;
+    use zip::ZipArchive;
+
+    let file = File::open(archive_path)?;
+    let mut archive = ZipArchive::new(file)?;
+    let entry = archive.by_index(0)?;
+    Ok(entry.unix_mode())
 }
 
 fn sevenz_entry_mtime_seconds(archive_path: &Path) -> Result<Option<i64>> {
@@ -307,6 +329,84 @@ fn test_default_strips_ownership_in_tar_zstd() -> Result<()> {
     assert_eq!(info.gid, 0);
     assert!(info.username.unwrap_or_default().is_empty());
     assert!(info.groupname.unwrap_or_default().is_empty());
+
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn test_keep_ownership_tar_zstd() -> Result<()> {
+    use std::os::unix::fs::MetadataExt;
+
+    let temp_dir = TempDir::new()?;
+    let source_file = temp_dir.path().join("owner.txt");
+    fs::write(&source_file, "ownership test")?;
+
+    let metadata = fs::metadata(&source_file)?;
+    let uid = metadata.uid() as u64;
+    let gid = metadata.gid() as u64;
+
+    let archive_path = temp_dir.path().join("owner_keep.zst");
+    zzz_cmd()
+        .args(["compress", "--keep-ownership", "-f", "zst", "-o"])
+        .arg(&archive_path)
+        .arg(&source_file)
+        .assert()
+        .success();
+
+    let info = read_zstd_tar_header_info(&archive_path)?;
+    assert_eq!(info.uid, uid);
+    assert_eq!(info.gid, gid);
+
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn test_keep_permissions_tar_zstd() -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp_dir = TempDir::new()?;
+    let source_file = temp_dir.path().join("mode.txt");
+    fs::write(&source_file, "mode test")?;
+    fs::set_permissions(&source_file, fs::Permissions::from_mode(0o700))?;
+
+    let archive_path = temp_dir.path().join("mode_keep.zst");
+    zzz_cmd()
+        .args(["compress", "--keep-permissions", "-f", "zst", "-o"])
+        .arg(&archive_path)
+        .arg(&source_file)
+        .assert()
+        .success();
+
+    let info = read_zstd_tar_header_info(&archive_path)?;
+    assert_eq!(info.mode & 0o777, 0o700);
+
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn test_keep_permissions_zip() -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp_dir = TempDir::new()?;
+    let source_file = temp_dir.path().join("mode.txt");
+    fs::write(&source_file, "mode test")?;
+    fs::set_permissions(&source_file, fs::Permissions::from_mode(0o700))?;
+
+    let archive_path = temp_dir.path().join("mode_keep.zip");
+    zzz_cmd()
+        .args(["compress", "--keep-permissions", "-f", "zip", "-o"])
+        .arg(&archive_path)
+        .arg(&source_file)
+        .assert()
+        .success();
+
+    let mode = zip_entry_mode(&archive_path)?.ok_or_else(|| {
+        anyhow::anyhow!("zip entry missing unix mode for {}", archive_path.display())
+    })?;
+    assert_eq!(mode & 0o777, 0o700);
 
     Ok(())
 }
@@ -538,6 +638,70 @@ fn test_strip_timestamps_flag_gzip_raw() -> Result<()> {
 }
 
 #[test]
+fn test_extract_preserves_mtime_gzip_raw() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+    let source_file = temp_dir.path().join("note.txt");
+    fs::write(&source_file, "gzip metadata test")?;
+
+    let expected_secs = 1_600_000_000;
+    filetime::set_file_mtime(&source_file, FileTime::from_unix_time(expected_secs, 0))?;
+
+    let archive_path = temp_dir.path().join("note.txt.gz");
+    zzz_cmd()
+        .args(["compress", "-f", "gz", "-o"])
+        .arg(&archive_path)
+        .arg(&source_file)
+        .assert()
+        .success();
+
+    let extract_dir = temp_dir.path().join("extract_gz");
+    zzz_cmd()
+        .args(["extract", "-C"])
+        .arg(&extract_dir)
+        .arg(&archive_path)
+        .assert()
+        .success();
+
+    let extracted = extract_dir.join("note.txt");
+    let actual = file_mtime_seconds(&extracted)?;
+    assert_eq!(actual, expected_secs);
+
+    Ok(())
+}
+
+#[test]
+fn test_extract_strip_timestamps_gzip_raw() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+    let source_file = temp_dir.path().join("note.txt");
+    fs::write(&source_file, "gzip metadata test")?;
+
+    let expected_secs = 1_600_000_000;
+    filetime::set_file_mtime(&source_file, FileTime::from_unix_time(expected_secs, 0))?;
+
+    let archive_path = temp_dir.path().join("note.txt.gz");
+    zzz_cmd()
+        .args(["compress", "-f", "gz", "-o"])
+        .arg(&archive_path)
+        .arg(&source_file)
+        .assert()
+        .success();
+
+    let extract_dir = temp_dir.path().join("extract_gz_strip");
+    zzz_cmd()
+        .args(["extract", "--strip-timestamps", "-C"])
+        .arg(&extract_dir)
+        .arg(&archive_path)
+        .assert()
+        .success();
+
+    let extracted = extract_dir.join("note.txt");
+    let actual = file_mtime_seconds(&extracted)?;
+    assert_ne!(actual, expected_secs);
+
+    Ok(())
+}
+
+#[test]
 fn test_extract_preserves_mtime_tar_zstd() -> Result<()> {
     let temp_dir = TempDir::new()?;
     let source_file = temp_dir.path().join("note.txt");
@@ -565,6 +729,72 @@ fn test_extract_preserves_mtime_tar_zstd() -> Result<()> {
     let extracted = extract_dir.join("note.txt");
     let extracted_secs = file_mtime_seconds(&extracted)?;
     assert_eq!(extracted_secs, expected_secs);
+
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn test_extract_preserves_permissions_tar_zstd() -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp_dir = TempDir::new()?;
+    let source_file = temp_dir.path().join("mode.txt");
+    fs::write(&source_file, "mode test")?;
+    fs::set_permissions(&source_file, fs::Permissions::from_mode(0o700))?;
+
+    let archive_path = temp_dir.path().join("mode_keep.zst");
+    zzz_cmd()
+        .args(["compress", "--keep-permissions", "-f", "zst", "-o"])
+        .arg(&archive_path)
+        .arg(&source_file)
+        .assert()
+        .success();
+
+    let extract_dir = temp_dir.path().join("extract_mode");
+    zzz_cmd()
+        .args(["extract", "--keep-permissions", "-C"])
+        .arg(&extract_dir)
+        .arg(&archive_path)
+        .assert()
+        .success();
+
+    let extracted = extract_dir.join("mode.txt");
+    let mode = file_mode_bits(&extracted)?;
+    assert_eq!(mode & 0o777, 0o700);
+
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn test_extract_preserves_permissions_zip() -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp_dir = TempDir::new()?;
+    let source_file = temp_dir.path().join("mode.txt");
+    fs::write(&source_file, "mode test")?;
+    fs::set_permissions(&source_file, fs::Permissions::from_mode(0o700))?;
+
+    let archive_path = temp_dir.path().join("mode_keep.zip");
+    zzz_cmd()
+        .args(["compress", "--keep-permissions", "-f", "zip", "-o"])
+        .arg(&archive_path)
+        .arg(&source_file)
+        .assert()
+        .success();
+
+    let extract_dir = temp_dir.path().join("extract_mode_zip");
+    zzz_cmd()
+        .args(["extract", "--keep-permissions", "-C"])
+        .arg(&extract_dir)
+        .arg(&archive_path)
+        .assert()
+        .success();
+
+    let extracted = extract_dir.join("mode.txt");
+    let mode = file_mode_bits(&extracted)?;
+    assert_eq!(mode & 0o777, 0o700);
 
     Ok(())
 }
