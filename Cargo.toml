@@ -1,6 +1,6 @@
 [package]
 name = "zzz-arc"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "A fast compression multitool supporting zst, tgz, txz, zip, and 7z formats with optional encryption"
 license = "MIT"
