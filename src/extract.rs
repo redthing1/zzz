@@ -13,6 +13,7 @@ pub fn extract(
     archive_path: &Path,
     output_dir: &Path,
     options: ExtractionOptions,
+    show_progress: bool,
     verbose: bool,
 ) -> Result<()> {
     if verbose {
@@ -35,8 +36,8 @@ pub fn extract(
         std::fs::create_dir_all(output_dir)?;
     }
 
-    // create progress tracker (enabled when verbose)
-    let progress = Progress::new_items(verbose, 0, verbose);
+    // create progress tracker (enabled when requested or verbose)
+    let progress = Progress::new_items(show_progress || verbose, 0, verbose);
 
     // dispatch to appropriate format implementation
     match format {

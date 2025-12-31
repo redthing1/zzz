@@ -101,6 +101,10 @@ pub enum Commands {
         #[arg(short = 'C', long)]
         directory: Option<PathBuf>,
 
+        /// show progress bar
+        #[arg(short = 'P', long)]
+        progress: bool,
+
         /// strip leading path components
         #[arg(long, default_value = "0")]
         strip_components: usize,

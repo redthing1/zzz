@@ -110,6 +110,7 @@ fn run(cli: Cli) -> zzz_arc::Result<()> {
             archive,
             destination,
             directory,
+            progress,
             strip_components,
             keep_xattrs,
             strip_timestamps,
@@ -130,7 +131,7 @@ fn run(cli: Cli) -> zzz_arc::Result<()> {
                 password,
             };
 
-            extract::extract(&archive, &extract_dir, options, cli.verbose)?;
+            extract::extract(&archive, &extract_dir, options, progress, cli.verbose)?;
         }
 
         Commands::List { archive } => {

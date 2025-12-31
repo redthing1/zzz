@@ -65,6 +65,7 @@ fn test_extract_help() {
         .assert()
         .success()
         .stdout(predicate::str::contains("extract archives"))
+        .stdout(predicate::str::contains("--progress"))
         .stdout(predicate::str::contains("--strip-components"))
         .stdout(predicate::str::contains("--keep-xattrs"))
         .stdout(predicate::str::contains("--keep-permissions"))
