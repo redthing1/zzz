@@ -87,12 +87,8 @@ pub fn compress(
 }
 
 fn ensure_output_outside_input(input_path: &Path, output_path: &Path) -> Result<()> {
-    let input_abs = std::fs::canonicalize(input_path).with_context(|| {
-        format!(
-            "Failed to resolve input path '{}'",
-            input_path.display()
-        )
-    })?;
+    let input_abs = std::fs::canonicalize(input_path)
+        .with_context(|| format!("Failed to resolve input path '{}'", input_path.display()))?;
     let output_abs = resolve_absolute_path(output_path)?;
     let output_resolved = canonicalize_with_fallback(&output_abs);
 

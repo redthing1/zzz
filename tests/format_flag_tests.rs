@@ -1,6 +1,6 @@
 //! Tests for explicit format flag functionality
 
-use assert_cmd::Command;
+use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 use std::fs;
 use tempfile::TempDir;
@@ -19,7 +19,7 @@ fn test_format_flag_with_compression_levels() -> Result<(), Box<dyn std::error::
             .path()
             .join(format!("test_{format}_level_{level}.archive"));
 
-        let mut cmd = Command::cargo_bin("zzz")?;
+        let mut cmd = cargo_bin_cmd!("zzz");
         cmd.arg("compress")
             .arg("-f")
             .arg(format)
@@ -48,7 +48,7 @@ fn test_format_flag_case_insensitive() -> Result<(), Box<dyn std::error::Error>>
     for format in case_variations {
         let output_file = temp_dir.path().join(format!("test_{format}.archive"));
 
-        let mut cmd = Command::cargo_bin("zzz")?;
+        let mut cmd = cargo_bin_cmd!("zzz");
         cmd.arg("compress")
             .arg("-f")
             .arg(format)
@@ -72,7 +72,7 @@ fn test_format_flag_short_option() -> Result<(), Box<dyn std::error::Error>> {
     let output_file = temp_dir.path().join("test_short.archive");
 
     // Test short option -f
-    let mut cmd = Command::cargo_bin("zzz")?;
+    let mut cmd = cargo_bin_cmd!("zzz");
     cmd.arg("compress")
         .arg("-f")
         .arg("zip")
@@ -95,7 +95,7 @@ fn test_format_flag_overrides_extension() -> Result<(), Box<dyn std::error::Erro
     // Create output with .zip extension but force 7z format
     let output_file = temp_dir.path().join("test.zip");
 
-    let mut cmd = Command::cargo_bin("zzz")?;
+    let mut cmd = cargo_bin_cmd!("zzz");
     cmd.arg("compress")
         .arg("-f")
         .arg("7z")
@@ -109,7 +109,7 @@ fn test_format_flag_overrides_extension() -> Result<(), Box<dyn std::error::Erro
 
     // Verify it was created as 7z format by checking we can list it
     // (magic number detection should work regardless of extension)
-    let mut cmd = Command::cargo_bin("zzz")?;
+    let mut cmd = cargo_bin_cmd!("zzz");
     cmd.arg("list").arg(&output_file);
     cmd.assert()
         .success()
@@ -130,7 +130,7 @@ fn test_format_flag_with_excludes() -> Result<(), Box<dyn std::error::Error>> {
 
     let output_file = temp_dir.path().join("test_excludes.archive");
 
-    let mut cmd = Command::cargo_bin("zzz")?;
+    let mut cmd = cargo_bin_cmd!("zzz");
     cmd.arg("compress")
         .arg("-f")
         .arg("tgz")
@@ -144,7 +144,7 @@ fn test_format_flag_with_excludes() -> Result<(), Box<dyn std::error::Error>> {
     assert!(output_file.exists());
 
     // Verify excluded file is not in archive
-    let mut cmd = Command::cargo_bin("zzz")?;
+    let mut cmd = cargo_bin_cmd!("zzz");
     cmd.arg("list").arg(&output_file);
     cmd.assert()
         .success()

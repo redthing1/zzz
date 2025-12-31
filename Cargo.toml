@@ -1,6 +1,6 @@
 [package]
 name = "zzz-arc"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2021"
 description = "A fast compression multitool supporting zst, tgz, txz, zip, and 7z formats with optional encryption"
 license = "MIT"
@@ -16,37 +16,37 @@ name = "zzz"
 path = "src/main.rs"
 
 [dependencies]
-clap = { version = "4.4", features = ["derive"] }
-zstd = "0.13"
-tar = { version = "0.4", features = ["xattr"] }
-walkdir = "2.4"
-indicatif = "0.17"
-anyhow = "1.0"
-glob = "0.3"
-num_cpus = "1.16"
-once_cell = "1.19.0"
-xattr = "1.5"
-time = "0.3"
-filetime = "0.2"
+clap = { version = "4.5.53", features = ["derive"] }
+zstd = "0.13.3"
+tar = { version = "0.4.44", features = ["xattr"] }
+walkdir = "2.5.0"
+indicatif = "0.18.3"
+anyhow = "1.0.100"
+glob = "0.3.3"
+num_cpus = "1.17.0"
+once_cell = "1.21.3"
+xattr = "1.6.1"
+time = "0.3.44"
+filetime = "0.2.26"
 # encryption dependencies
-argon2 = "0.5"
-aes-gcm = "0.10"
-rand = "0.8"
+argon2 = "0.5.3"
+aes-gcm = "0.10.3"
+rand = "0.8.5"
 # compression formats
-flate2 = "1.0"  # gz
-xz2 = "0.1"     # xz
-zip = { version = "0.6", features = ["deflate", "time"] }     # zip
-sevenz-rust = { version = "0.6", features = ["aes256"] }  # 7z
+flate2 = "1.1.5"  # gz
+xz2 = "0.1.7"     # xz
+zip = { version = "7.0.0", default-features = false, features = ["aes-crypto", "bzip2", "deflate", "time", "zstd"] }     # zip
+sevenz-rust = { version = "0.6.1", features = ["aes256"] }  # 7z
 # magic number detection
-tree_magic_mini = "3.1"
+tree_magic_mini = "3.2.2"
 # rar support (optional)
-unrar = { version = "0.5", optional = true }
+unrar = { version = "0.5.8", optional = true }
 
 [features]
 default = []
 rar = ["unrar"]
 
 [dev-dependencies]
-tempfile = "3.8"
-assert_cmd = "2.0"
-predicates = "3.1"
+tempfile = "3.24.0"
+assert_cmd = "2.1.1"
+predicates = "3.1.3"

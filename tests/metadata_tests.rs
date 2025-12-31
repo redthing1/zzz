@@ -1,5 +1,6 @@
 //! Metadata-focused tests for redaction and defaults.
 
+use assert_cmd::cargo::cargo_bin_cmd;
 use assert_cmd::Command;
 use filetime::FileTime;
 use std::{fs, path::Path};
@@ -8,7 +9,7 @@ use tempfile::TempDir;
 type Result<T> = anyhow::Result<T>;
 
 fn zzz_cmd() -> Command {
-    Command::cargo_bin("zzz").expect("failed to find zzz binary")
+    cargo_bin_cmd!("zzz")
 }
 
 struct TarHeaderInfo {
@@ -129,7 +130,10 @@ fn zip_entry_mtime_seconds(archive_path: &Path) -> Result<Option<i64>> {
     let file = File::open(archive_path)?;
     let mut archive = ZipArchive::new(file)?;
     let entry = archive.by_index(0)?;
-    let Ok(offset_time) = entry.last_modified().to_time() else {
+    let Some(last_modified) = entry.last_modified() else {
+        return Ok(None);
+    };
+    let Ok(offset_time) = time::OffsetDateTime::try_from(last_modified) else {
         return Ok(None);
     };
     let system_time: std::time::SystemTime = offset_time.into();
@@ -456,7 +460,7 @@ fn test_redact_strips_timestamps_zip() -> Result<()> {
     let file = File::open(&archive_path)?;
     let mut archive = ZipArchive::new(file)?;
     let entry = archive.by_index(0)?;
-    let timestamp = entry.last_modified();
+    let timestamp = entry.last_modified().expect("zip entry missing timestamp");
     assert_eq!(timestamp.year(), 1980);
 
     Ok(())
@@ -486,7 +490,7 @@ fn test_default_preserves_zip_timestamps() -> Result<()> {
     let file = File::open(&archive_path)?;
     let mut archive = ZipArchive::new(file)?;
     let entry = archive.by_index(0)?;
-    let timestamp = entry.last_modified();
+    let timestamp = entry.last_modified().expect("zip entry missing timestamp");
 
     assert_eq!(timestamp.year(), expected.year());
     assert_eq!(timestamp.month(), expected.month());
@@ -518,7 +522,7 @@ fn test_strip_timestamps_flag_zip() -> Result<()> {
     let file = File::open(&archive_path)?;
     let mut archive = ZipArchive::new(file)?;
     let entry = archive.by_index(0)?;
-    let timestamp = entry.last_modified();
+    let timestamp = entry.last_modified().expect("zip entry missing timestamp");
     assert_eq!(timestamp.year(), 1980);
 
     Ok(())

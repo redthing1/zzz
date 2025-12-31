@@ -55,8 +55,8 @@ impl CompressionFormat for ZipFormat {
         let mut zip_writer = ZipWriter::new(buf_writer);
 
         // Map compression level (1-22) to zip level (0-9)
-        let zip_level = (((options.level as f32 / 22.0) * 9.0) as i32).clamp(0, 9);
-        let base_file_options = FileOptions::default()
+        let zip_level = (((options.level as f32 / 22.0) * 9.0) as i64).clamp(0, 9);
+        let base_file_options = FileOptions::<()>::default()
             .compression_method(CompressionMethod::Deflated)
             .compression_level(Some(zip_level));
 
@@ -265,7 +265,9 @@ impl CompressionFormat for ZipFormat {
             let entry_mtime = if options.strip_timestamps || file.is_dir() {
                 None
             } else {
-                file.last_modified().to_time().ok().map(SystemTime::from)
+                file.last_modified()
+                    .and_then(|dt| OffsetDateTime::try_from(dt).ok())
+                    .map(SystemTime::from)
             };
             let entry_mode = if options.preserve_permissions {
                 file.unix_mode()

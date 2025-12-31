@@ -202,8 +202,7 @@ impl Format {
                 "application/x-7z-compressed" => Ok(Format::SevenZ),
                 "application/x-rar-compressed" | "application/vnd.rar" => Ok(Format::Rar),
                 _ => Err(anyhow::anyhow!(
-                    "unsupported archive format (unknown mime type from tree_magic_mini: {})",
-                    mime_type
+                    "unsupported archive format (unknown mime type from tree_magic_mini: {mime_type})"
                 )),
             },
             None => Err(anyhow::anyhow!(

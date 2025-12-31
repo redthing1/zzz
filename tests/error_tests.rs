@@ -251,7 +251,7 @@ fn test_extract_rejects_unsafe_paths() -> Result<()> {
 
     let output_file = fs::File::create(&archive_path)?;
     let mut zip = zip::ZipWriter::new(output_file);
-    zip.start_file("../evil.txt", zip::write::FileOptions::default())?;
+    zip.start_file("../evil.txt", zip::write::FileOptions::<()>::default())?;
     zip.write_all(b"unsafe content")?;
     zip.finish()?;
 
@@ -276,7 +276,7 @@ fn test_zip_integrity_detects_corruption() -> Result<()> {
 
     let file = fs::File::create(&archive_path)?;
     let mut zip = zip::ZipWriter::new(file);
-    zip.start_file("file.txt", FileOptions::default())?;
+    zip.start_file("file.txt", FileOptions::<()>::default())?;
     zip.write_all(b"zip content")?;
     zip.finish()?;
 
@@ -310,7 +310,7 @@ fn test_extract_rejects_symlink_ancestor() -> Result<()> {
 
     let file = fs::File::create(&archive_path)?;
     let mut zip = zip::ZipWriter::new(file);
-    zip.start_file("link/evil.txt", FileOptions::default())?;
+    zip.start_file("link/evil.txt", FileOptions::<()>::default())?;
     zip.write_all(b"evil")?;
     zip.finish()?;
 

@@ -1,3 +1,4 @@
+use assert_cmd::cargo::cargo_bin_cmd;
 use assert_cmd::Command;
 use predicates::prelude::*;
 use std::fs;
@@ -6,7 +7,7 @@ use tempfile::TempDir;
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 fn zzz_cmd() -> Command {
-    Command::cargo_bin("zzz").unwrap()
+    cargo_bin_cmd!("zzz")
 }
 
 // Helper to create a dummy file

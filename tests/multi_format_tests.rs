@@ -1,6 +1,6 @@
 //! Integration tests for multiple compression formats
 
-use assert_cmd::Command;
+use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 use std::fs;
 use tempfile::TempDir;
@@ -27,7 +27,7 @@ fn test_zstd_format() -> Result<(), Box<dyn std::error::Error>> {
     let output_file = temp_dir.path().join("test.zst");
 
     // Test compression
-    let mut cmd = Command::cargo_bin("zzz")?;
+    let mut cmd = cargo_bin_cmd!("zzz");
     cmd.arg("compress")
         .arg("-o")
         .arg(&output_file)
@@ -37,7 +37,7 @@ fn test_zstd_format() -> Result<(), Box<dyn std::error::Error>> {
     assert!(output_file.exists());
 
     // Test listing
-    let mut cmd = Command::cargo_bin("zzz")?;
+    let mut cmd = cargo_bin_cmd!("zzz");
     cmd.arg("list").arg(&output_file);
     cmd.assert()
         .success()
@@ -47,7 +47,7 @@ fn test_zstd_format() -> Result<(), Box<dyn std::error::Error>> {
 
     // Test extraction
     let extract_dir = temp_dir.path().join("extract");
-    let mut cmd = Command::cargo_bin("zzz")?;
+    let mut cmd = cargo_bin_cmd!("zzz");
     cmd.arg("extract")
         .arg(&output_file)
         .arg("-C")
@@ -75,7 +75,7 @@ fn test_gzip_format() -> Result<(), Box<dyn std::error::Error>> {
     let output_file = temp_dir.path().join("test.tgz");
 
     // Test compression
-    let mut cmd = Command::cargo_bin("zzz")?;
+    let mut cmd = cargo_bin_cmd!("zzz");
     cmd.arg("compress")
         .arg("-o")
         .arg(&output_file)
@@ -85,7 +85,7 @@ fn test_gzip_format() -> Result<(), Box<dyn std::error::Error>> {
     assert!(output_file.exists());
 
     // Test listing
-    let mut cmd = Command::cargo_bin("zzz")?;
+    let mut cmd = cargo_bin_cmd!("zzz");
     cmd.arg("list").arg(&output_file);
     cmd.assert()
         .success()
@@ -94,7 +94,7 @@ fn test_gzip_format() -> Result<(), Box<dyn std::error::Error>> {
 
     // Test extraction
     let extract_dir = temp_dir.path().join("extract");
-    let mut cmd = Command::cargo_bin("zzz")?;
+    let mut cmd = cargo_bin_cmd!("zzz");
     cmd.arg("extract")
         .arg(&output_file)
         .arg("-C")
@@ -119,7 +119,7 @@ fn test_xz_format() -> Result<(), Box<dyn std::error::Error>> {
     let output_file = temp_dir.path().join("test.txz");
 
     // Test compression
-    let mut cmd = Command::cargo_bin("zzz")?;
+    let mut cmd = cargo_bin_cmd!("zzz");
     cmd.arg("compress")
         .arg("-o")
         .arg(&output_file)
@@ -129,12 +129,12 @@ fn test_xz_format() -> Result<(), Box<dyn std::error::Error>> {
     assert!(output_file.exists());
 
     // Test listing and extraction
-    let mut cmd = Command::cargo_bin("zzz")?;
+    let mut cmd = cargo_bin_cmd!("zzz");
     cmd.arg("list").arg(&output_file);
     cmd.assert().success();
 
     let extract_dir = temp_dir.path().join("extract");
-    let mut cmd = Command::cargo_bin("zzz")?;
+    let mut cmd = cargo_bin_cmd!("zzz");
     cmd.arg("extract")
         .arg(&output_file)
         .arg("-C")
@@ -156,7 +156,7 @@ fn test_zip_format() -> Result<(), Box<dyn std::error::Error>> {
     let output_file = temp_dir.path().join("test.zip");
 
     // Test compression
-    let mut cmd = Command::cargo_bin("zzz")?;
+    let mut cmd = cargo_bin_cmd!("zzz");
     cmd.arg("compress")
         .arg("-o")
         .arg(&output_file)
@@ -166,12 +166,12 @@ fn test_zip_format() -> Result<(), Box<dyn std::error::Error>> {
     assert!(output_file.exists());
 
     // Test listing and extraction
-    let mut cmd = Command::cargo_bin("zzz")?;
+    let mut cmd = cargo_bin_cmd!("zzz");
     cmd.arg("list").arg(&output_file);
     cmd.assert().success();
 
     let extract_dir = temp_dir.path().join("extract");
-    let mut cmd = Command::cargo_bin("zzz")?;
+    let mut cmd = cargo_bin_cmd!("zzz");
     cmd.arg("extract")
         .arg(&output_file)
         .arg("-C")
@@ -193,7 +193,7 @@ fn test_7z_format() -> Result<(), Box<dyn std::error::Error>> {
     let output_file = temp_dir.path().join("test.7z");
 
     // Test compression
-    let mut cmd = Command::cargo_bin("zzz")?;
+    let mut cmd = cargo_bin_cmd!("zzz");
     cmd.arg("compress")
         .arg("-o")
         .arg(&output_file)
@@ -203,12 +203,12 @@ fn test_7z_format() -> Result<(), Box<dyn std::error::Error>> {
     assert!(output_file.exists());
 
     // Test listing and extraction
-    let mut cmd = Command::cargo_bin("zzz")?;
+    let mut cmd = cargo_bin_cmd!("zzz");
     cmd.arg("list").arg(&output_file);
     cmd.assert().success();
 
     let extract_dir = temp_dir.path().join("extract");
-    let mut cmd = Command::cargo_bin("zzz")?;
+    let mut cmd = cargo_bin_cmd!("zzz");
     cmd.arg("extract")
         .arg(&output_file)
         .arg("-C")
@@ -228,7 +228,7 @@ fn test_format_detection_by_magic() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create a zst file without extension
     let zst_file = temp_dir.path().join("test.zst");
-    let mut cmd = Command::cargo_bin("zzz")?;
+    let mut cmd = cargo_bin_cmd!("zzz");
     cmd.arg("compress").arg("-o").arg(&zst_file).arg(&test_file);
     cmd.assert().success();
 
@@ -237,7 +237,7 @@ fn test_format_detection_by_magic() -> Result<(), Box<dyn std::error::Error>> {
     fs::copy(&zst_file, &unknown_file)?;
 
     // Test that we can still list it (magic number detection)
-    let mut cmd = Command::cargo_bin("zzz")?;
+    let mut cmd = cargo_bin_cmd!("zzz");
     cmd.arg("list").arg(&unknown_file);
     cmd.assert()
         .success()
@@ -256,7 +256,7 @@ fn test_compression_levels() -> Result<(), Box<dyn std::error::Error>> {
     for level in [1, 5, 10, 15, 20, 22] {
         let output_file = temp_dir.path().join(format!("test_level_{level}.zst"));
 
-        let mut cmd = Command::cargo_bin("zzz")?;
+        let mut cmd = cargo_bin_cmd!("zzz");
         cmd.arg("compress")
             .arg("-l")
             .arg(level.to_string())
@@ -283,7 +283,7 @@ fn test_verbose_output() -> Result<(), Box<dyn std::error::Error>> {
     for format in case_variations {
         let output_file = temp_dir.path().join(format!("test_{format}.archive"));
 
-        let mut cmd = Command::cargo_bin("zzz")?;
+        let mut cmd = cargo_bin_cmd!("zzz");
         cmd.arg("compress")
             .arg("-f")
             .arg(format)
@@ -306,7 +306,7 @@ fn test_unsupported_format() -> Result<(), Box<dyn std::error::Error>> {
 
     let output_file = temp_dir.path().join("test.unknown");
 
-    let mut cmd = Command::cargo_bin("zzz")?;
+    let mut cmd = cargo_bin_cmd!("zzz");
     cmd.arg("compress")
         .arg("-o")
         .arg(&output_file)
@@ -325,7 +325,7 @@ fn test_format_flag_override() -> Result<(), Box<dyn std::error::Error>> {
     // Test format override with non-matching extension
     let output_file = temp_dir.path().join("test.archive");
 
-    let mut cmd = Command::cargo_bin("zzz")?;
+    let mut cmd = cargo_bin_cmd!("zzz");
     cmd.arg("compress")
         .arg("-f")
         .arg("zip")
@@ -337,7 +337,7 @@ fn test_format_flag_override() -> Result<(), Box<dyn std::error::Error>> {
     assert!(output_file.exists());
 
     // Verify it was created as ZIP by listing it
-    let mut cmd = Command::cargo_bin("zzz")?;
+    let mut cmd = cargo_bin_cmd!("zzz");
     cmd.arg("list").arg(&output_file);
     cmd.assert()
         .success()
@@ -353,7 +353,7 @@ fn test_format_flag_auto_extension() -> Result<(), Box<dyn std::error::Error>> {
     fs::write(&test_file, "test content")?;
 
     // Test format flag with auto-generated extension
-    let mut cmd = Command::cargo_bin("zzz")?;
+    let mut cmd = cargo_bin_cmd!("zzz");
     cmd.arg("compress").arg("-f").arg("7z").arg(&test_file);
     cmd.assert().success();
 
@@ -381,7 +381,7 @@ fn test_format_flag_all_formats() -> Result<(), Box<dyn std::error::Error>> {
     for (format, output_name) in formats {
         let output_file = temp_dir.path().join(output_name);
 
-        let mut cmd = Command::cargo_bin("zzz")?;
+        let mut cmd = cargo_bin_cmd!("zzz");
         cmd.arg("compress")
             .arg("-f")
             .arg(format)
@@ -393,7 +393,7 @@ fn test_format_flag_all_formats() -> Result<(), Box<dyn std::error::Error>> {
         assert!(output_file.exists());
 
         // Verify we can list the archive
-        let mut cmd = Command::cargo_bin("zzz")?;
+        let mut cmd = cargo_bin_cmd!("zzz");
         cmd.arg("list").arg(&output_file);
         cmd.assert().success();
     }
@@ -407,7 +407,7 @@ fn test_format_flag_invalid() -> Result<(), Box<dyn std::error::Error>> {
     let test_file = temp_dir.path().join("test.txt");
     fs::write(&test_file, "test content")?;
 
-    let mut cmd = Command::cargo_bin("zzz")?;
+    let mut cmd = cargo_bin_cmd!("zzz");
     cmd.arg("compress")
         .arg("-f")
         .arg("invalid_format")
@@ -437,7 +437,7 @@ fn test_format_flag_aliases() -> Result<(), Box<dyn std::error::Error>> {
     for (alias, output_name) in aliases {
         let output_file = temp_dir.path().join(output_name);
 
-        let mut cmd = Command::cargo_bin("zzz")?;
+        let mut cmd = cargo_bin_cmd!("zzz");
         cmd.arg("compress")
             .arg("-f")
             .arg(alias)
@@ -466,7 +466,7 @@ fn test_format_flag_with_compression_levels() -> Result<(), Box<dyn std::error::
             .path()
             .join(format!("test_{format}_level_{level}.archive"));
 
-        let mut cmd = Command::cargo_bin("zzz")?;
+        let mut cmd = cargo_bin_cmd!("zzz");
         cmd.arg("compress")
             .arg("-f")
             .arg(format)
@@ -495,7 +495,7 @@ fn test_format_flag_case_insensitive() -> Result<(), Box<dyn std::error::Error>>
     for format in case_variations {
         let output_file = temp_dir.path().join(format!("test_{format}.archive"));
 
-        let mut cmd = Command::cargo_bin("zzz")?;
+        let mut cmd = cargo_bin_cmd!("zzz");
         cmd.arg("compress")
             .arg("-f")
             .arg(format)

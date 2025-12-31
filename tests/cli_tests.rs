@@ -1,5 +1,6 @@
 //! CLI integration tests for zzz
 
+use assert_cmd::cargo::cargo_bin_cmd;
 use assert_cmd::Command;
 use predicates::prelude::*;
 use std::fs;
@@ -8,7 +9,7 @@ use tempfile::TempDir;
 type Result<T> = anyhow::Result<T>;
 
 fn zzz_cmd() -> Command {
-    Command::cargo_bin("zzz").expect("failed to find zzz binary")
+    cargo_bin_cmd!("zzz")
 }
 
 #[test]

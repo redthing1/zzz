@@ -73,13 +73,13 @@ pub fn derive_key(password: &str, salt_opt: Option<&[u8]>) -> Result<(Vec<u8>, V
         ARGON2_LANES,
         Some(AES_KEY_SIZE),
     )
-    .map_err(|e| anyhow!("Failed to create Argon2 parameters: {}", e))?;
+    .map_err(|e| anyhow!("Failed to create Argon2 parameters: {e}"))?;
     let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
 
     let mut derived_key = vec![0u8; AES_KEY_SIZE];
     argon2
         .hash_password_into(password.as_bytes(), &salt, &mut derived_key)
-        .map_err(|e| anyhow!("Argon2 key derivation failed: {}", e))?;
+        .map_err(|e| anyhow!("Argon2 key derivation failed: {e}"))?;
 
     Ok((derived_key, salt))
 }
@@ -105,7 +105,7 @@ impl<W: std::io::Write> EncryptingWriter<W> {
             ));
         }
         let cipher = Aes256Gcm::new_from_slice(key)
-            .map_err(|e| anyhow!("Failed to initialize AES-GCM cipher: {}", e))?;
+            .map_err(|e| anyhow!("Failed to initialize AES-GCM cipher: {e}"))?;
         Ok(Self {
             inner,
             cipher,
@@ -130,7 +130,7 @@ impl<W: std::io::Write> EncryptingWriter<W> {
         let ciphertext_with_tag = self
             .cipher
             .encrypt(nonce, self.buffer.as_slice())
-            .map_err(|e| anyhow!("AES-GCM encryption failed: {}", e))?;
+            .map_err(|e| anyhow!("AES-GCM encryption failed: {e}"))?;
 
         // Write: nonce + length + ciphertext_with_tag
         self.inner
@@ -215,7 +215,7 @@ impl<R: Read> DecryptingReader<R> {
             ));
         }
         let cipher = Aes256Gcm::new_from_slice(key)
-            .map_err(|e| anyhow!("Failed to initialize AES-GCM cipher: {}", e))?;
+            .map_err(|e| anyhow!("Failed to initialize AES-GCM cipher: {e}"))?;
         Ok(Self {
             inner,
             cipher,
@@ -254,18 +254,10 @@ impl<R: Read> DecryptingReader<R> {
         let ct_with_tag_len = u32::from_be_bytes(len_bytes) as usize;
 
         if ct_with_tag_len < TAG_SIZE {
-            bail!(
-                "Invalid ciphertext length: {} (must be at least TAG_SIZE {})",
-                ct_with_tag_len,
-                TAG_SIZE
-            );
+            bail!("Invalid ciphertext length: {ct_with_tag_len} (must be at least TAG_SIZE {TAG_SIZE})");
         }
         if ct_with_tag_len > MAX_ENCRYPTED_CHUNK_LEN {
-            bail!(
-                "Invalid ciphertext length: {} (exceeds max {})",
-                ct_with_tag_len,
-                MAX_ENCRYPTED_CHUNK_LEN
-            );
+            bail!("Invalid ciphertext length: {ct_with_tag_len} (exceeds max {MAX_ENCRYPTED_CHUNK_LEN})");
         }
 
         // Read ciphertext with tag
@@ -278,12 +270,7 @@ impl<R: Read> DecryptingReader<R> {
         let plaintext = self
             .cipher
             .decrypt(nonce, ciphertext_with_tag.as_slice())
-            .map_err(|e| {
-                anyhow!(
-                    "AES-GCM decryption failed (data integrity or key error): {}",
-                    e
-                )
-            })?;
+            .map_err(|e| anyhow!("AES-GCM decryption failed (data integrity or key error): {e}"))?;
 
         self.buffer = plaintext;
         Ok(true)
