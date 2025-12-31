@@ -1,19 +1,33 @@
 //! progress reporting functionality
 
 use indicatif::{ProgressBar, ProgressStyle};
+use std::io::Read;
 
 const PROGRESS_BYTES_TEMPLATE: &str =
     "{spinner:.green} [{elapsed_precise}] [{bar:.cyan/blue}] {bytes}/{total_bytes} {bytes_per_sec} ({eta})";
 const PROGRESS_ITEMS_TEMPLATE: &str =
     "{spinner:.green} [{elapsed_precise}] [{bar:.cyan/blue}] {pos}/{len} items ({eta})";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProgressKind {
+    Bytes,
+    Items,
+}
+
 pub struct Progress {
     bar: Option<ProgressBar>,
     verbose: bool,
+    kind: ProgressKind,
 }
 
 impl Progress {
-    fn new_with_template(enabled: bool, total: u64, template: &str, verbose: bool) -> Self {
+    fn new_with_template(
+        enabled: bool,
+        total: u64,
+        template: &str,
+        verbose: bool,
+        kind: ProgressKind,
+    ) -> Self {
         let bar = if enabled {
             let pb = ProgressBar::new(total);
             pb.set_style(
@@ -27,17 +41,29 @@ impl Progress {
             None
         };
 
-        Self { bar, verbose }
+        Self { bar, verbose, kind }
     }
 
     /// create new byte-based progress reporter, only shows progress if enabled
     pub fn new(enabled: bool, total_bytes: u64, verbose: bool) -> Self {
-        Self::new_with_template(enabled, total_bytes, PROGRESS_BYTES_TEMPLATE, verbose)
+        Self::new_with_template(
+            enabled,
+            total_bytes,
+            PROGRESS_BYTES_TEMPLATE,
+            verbose,
+            ProgressKind::Bytes,
+        )
     }
 
     /// create new item-count progress reporter, only shows progress if enabled
     pub fn new_items(enabled: bool, total_items: u64, verbose: bool) -> Self {
-        Self::new_with_template(enabled, total_items, PROGRESS_ITEMS_TEMPLATE, verbose)
+        Self::new_with_template(
+            enabled,
+            total_items,
+            PROGRESS_ITEMS_TEMPLATE,
+            verbose,
+            ProgressKind::Items,
+        )
     }
 
     /// update progress with current bytes processed
@@ -78,6 +104,40 @@ impl Progress {
     /// check if verbose logging is enabled
     pub fn is_verbose(&self) -> bool {
         self.verbose
+    }
+
+    /// check if this progress tracks items (vs bytes)
+    pub fn is_items(&self) -> bool {
+        self.kind == ProgressKind::Items
+    }
+}
+
+pub struct ProgressReader<'a, R> {
+    inner: R,
+    progress: Option<&'a Progress>,
+    bytes_read: u64,
+}
+
+impl<'a, R> ProgressReader<'a, R> {
+    pub fn new(inner: R, progress: Option<&'a Progress>) -> Self {
+        Self {
+            inner,
+            progress,
+            bytes_read: 0,
+        }
+    }
+}
+
+impl<'a, R: Read> Read for ProgressReader<'a, R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let read = self.inner.read(buf)?;
+        if read > 0 {
+            self.bytes_read += read as u64;
+            if let Some(progress) = self.progress {
+                progress.update(self.bytes_read);
+            }
+        }
+        Ok(read)
     }
 }
 

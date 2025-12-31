@@ -6,7 +6,7 @@ use crate::{
         tarball, ArchiveEntry, CompressionFormat, CompressionOptions, CompressionStats,
         ExtractionOptions,
     },
-    progress::Progress,
+    progress::{Progress, ProgressReader},
     utils, Result,
 };
 use anyhow::Context;
@@ -183,6 +183,13 @@ impl CompressionFormat for GzipFormat {
         options: &ExtractionOptions,
         progress: Option<&crate::progress::Progress>,
     ) -> Result<()> {
+        let archive_size = std::fs::metadata(archive_path)
+            .with_context(|| format!("Failed to read archive metadata {}", archive_path.display()))?
+            .len();
+        if let Some(progress) = progress {
+            progress.set_length(archive_size);
+        }
+
         if is_raw_gz(archive_path) {
             let output_name = raw_output_name(archive_path)
                 .ok_or_else(|| anyhow::anyhow!("Failed to determine output filename"))?;
@@ -210,7 +217,7 @@ impl CompressionFormat for GzipFormat {
             let file = File::open(archive_path).with_context(|| {
                 format!("Failed to open archive file {}", archive_path.display())
             })?;
-            let mut decoder = GzDecoder::new(file);
+            let mut decoder = GzDecoder::new(ProgressReader::new(file, progress));
             let mtime = if options.strip_timestamps {
                 None
             } else {
@@ -230,7 +237,7 @@ impl CompressionFormat for GzipFormat {
         let file = File::open(archive_path)
             .with_context(|| format!("Failed to open archive file {}", archive_path.display()))?;
         let buf_reader = BufReader::new(file);
-        let decoder = GzDecoder::new(buf_reader);
+        let decoder = GzDecoder::new(ProgressReader::new(buf_reader, progress));
 
         tarball::extract_tarball(decoder, output_dir, options, progress)
     }

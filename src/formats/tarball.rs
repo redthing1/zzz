@@ -378,7 +378,9 @@ pub fn extract_tarball<R: Read>(
 
         entry_count += 1;
         if let Some(progress) = progress {
-            progress.set_position(entry_count);
+            if progress.is_items() {
+                progress.set_position(entry_count);
+            }
         }
     }
 

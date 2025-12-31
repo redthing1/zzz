@@ -37,7 +37,14 @@ pub fn extract(
     }
 
     // create progress tracker (enabled when requested or verbose)
-    let progress = Progress::new_items(show_progress || verbose, 0, verbose);
+    let progress = match format {
+        Format::Zstd | Format::Gzip | Format::Xz => {
+            Progress::new(show_progress || verbose, 0, verbose)
+        }
+        Format::Zip | Format::SevenZ | Format::Rar => {
+            Progress::new_items(show_progress || verbose, 0, verbose)
+        }
+    };
 
     // dispatch to appropriate format implementation
     match format {

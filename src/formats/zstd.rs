@@ -9,7 +9,7 @@ use crate::formats::{
     tarball, ArchiveEntry, CompressionFormat, CompressionOptions, CompressionStats,
     ExtractionOptions,
 };
-use crate::progress::Progress;
+use crate::progress::{Progress, ProgressReader};
 use crate::Result;
 use anyhow::{anyhow, bail, Context};
 use std::fs::File;
@@ -138,6 +138,14 @@ impl CompressionFormat for ZstdFormat {
         // open archive file
         let mut archive_file = File::open(archive_path)
             .with_context(|| format!("failed to open archive file: {}", archive_path.display()))?;
+        let archive_size = std::fs::metadata(archive_path)
+            .with_context(|| {
+                format!(
+                    "failed to read archive metadata: {}",
+                    archive_path.display()
+                )
+            })?
+            .len();
 
         // Check for encryption magic header
         let mut magic_buffer = [0u8; ENCRYPTED_ZSTD_MAGIC.len()];
@@ -146,7 +154,8 @@ impl CompressionFormat for ZstdFormat {
             .context("Failed to read initial bytes from archive for encryption check")?;
 
         // Determine if this is an encrypted archive and set up the input stream
-        let input_stream: Box<dyn Read> = if bytes_read == ENCRYPTED_ZSTD_MAGIC.len()
+        let (input_stream, bytes_offset): (Box<dyn Read>, u64) = if bytes_read
+            == ENCRYPTED_ZSTD_MAGIC.len()
             && magic_buffer == *ENCRYPTED_ZSTD_MAGIC
         {
             // This is an encrypted archive
@@ -175,10 +184,14 @@ impl CompressionFormat for ZstdFormat {
                 .context("Failed to derive decryption key")?;
 
             // Create decrypting reader
-            let decrypting_reader = DecryptingReader::new(archive_file, &derived_key)
-                .context("Failed to create DecryptingReader for ZSTD")?;
+            let decrypting_reader =
+                DecryptingReader::new(ProgressReader::new(archive_file, progress), &derived_key)
+                    .context("Failed to create DecryptingReader for ZSTD")?;
 
-            Box::new(decrypting_reader)
+            (
+                Box::new(decrypting_reader),
+                (ENCRYPTED_ZSTD_MAGIC.len() + ARGON2_SALT_LEN) as u64,
+            )
         } else {
             // This is a standard (unencrypted) archive
             archive_file
@@ -194,8 +207,12 @@ impl CompressionFormat for ZstdFormat {
                 );
             }
 
-            Box::new(archive_file)
+            (Box::new(ProgressReader::new(archive_file, progress)), 0)
         };
+
+        if let Some(progress) = progress {
+            progress.set_length(archive_size.saturating_sub(bytes_offset));
+        }
 
         // create zstd decoder with the appropriate input stream
         let decoder = zstd::Decoder::new(input_stream).with_context(|| {
