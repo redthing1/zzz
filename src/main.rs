@@ -36,6 +36,7 @@ fn run(cli: Cli) -> zzz_arc::Result<()> {
             strip_timestamps,
             no_default_excludes,
             format,
+            overwrite,
             password,
         } => {
             let output_path = Cli::get_output_path(&input, output, format);
@@ -47,7 +48,7 @@ fn run(cli: Cli) -> zzz_arc::Result<()> {
             }
 
             // check if output already exists and prompt user
-            if output_path.exists() {
+            if output_path.exists() && !overwrite {
                 let prompt_message = format!(
                     "output file '{}' already exists. overwrite?",
                     output_path.display()

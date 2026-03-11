@@ -55,7 +55,8 @@ fn test_compress_help() {
         .stdout(predicate::str::contains("--follow-symlinks"))
         .stdout(predicate::str::contains("--allow-symlink-escape"))
         .stdout(predicate::str::contains("--redact"))
-        .stdout(predicate::str::contains("--strip-timestamps"));
+        .stdout(predicate::str::contains("--strip-timestamps"))
+        .stdout(predicate::str::contains("--overwrite"));
 }
 
 #[test]

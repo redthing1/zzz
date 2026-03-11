@@ -80,6 +80,10 @@ pub enum Commands {
         #[arg(short = 'f', long, value_parser = parse_format)]
         format: Option<crate::formats::Format>,
 
+        /// overwrite existing output file
+        #[arg(short = 'y', long)]
+        overwrite: bool,
+
         /// input file or directory
         input: PathBuf,
 
@@ -126,7 +130,7 @@ pub enum Commands {
         keep_ownership: bool,
 
         /// overwrite existing files
-        #[arg(short = 'w', long)]
+        #[arg(short = 'y', long)]
         overwrite: bool,
 
         /// password for decryption (for zst and 7z)
