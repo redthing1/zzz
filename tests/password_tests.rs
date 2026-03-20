@@ -248,9 +248,18 @@ fn test_zstd_password_support() -> Result<()> {
     let input_file = create_test_file(&tmp_dir, "test.txt", "ZSTD password test content")?;
     let output_archive = tmp_dir.path().join("test.zst");
 
-    // Test that compressing with password succeeds for ZSTD
+    // Test that threaded compression with password succeeds for ZSTD
     zzz_cmd()
-        .args(["compress", "--password", "zstdtest123", "-f", "zst", "-o"])
+        .args([
+            "-j",
+            "2",
+            "compress",
+            "--password",
+            "zstdtest123",
+            "-f",
+            "zst",
+            "-o",
+        ])
         .arg(&output_archive)
         .arg(&input_file)
         .assert()

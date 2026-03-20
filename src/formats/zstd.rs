@@ -15,9 +15,64 @@ use anyhow::{anyhow, bail, Context};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
-use zstd::stream::raw::CParameter;
 
 pub struct ZstdFormat;
+
+fn resolved_thread_count(requested_threads: u32) -> u32 {
+    if requested_threads == 0 {
+        std::thread::available_parallelism()
+            .map(|parallelism| parallelism.get() as u32)
+            .unwrap_or(1)
+    } else {
+        requested_threads
+    }
+}
+
+fn configure_threads<W: Write>(
+    encoder: &mut zstd::Encoder<'_, W>,
+    requested_threads: u32,
+) -> Result<()> {
+    let thread_count = resolved_thread_count(requested_threads);
+
+    // Preserve `-j1` as a single-threaded request. zstd's `NbWorkers=1`
+    // still offloads compression onto a background worker thread.
+    if thread_count <= 1 {
+        return Ok(());
+    }
+
+    encoder.multithread(thread_count).with_context(|| {
+        format!("failed to enable multithreaded zstd compression with {thread_count} workers")
+    })?;
+
+    Ok(())
+}
+
+fn compress_tarball<W: Write>(
+    writer: W,
+    input_path: &Path,
+    zstd_level: i32,
+    options: &CompressionOptions,
+    filter: &FileFilter,
+    progress: Option<&Progress>,
+    build_options: tarball::BuildOptions,
+) -> Result<()> {
+    let mut zstd_encoder =
+        zstd::Encoder::new(writer, zstd_level).context("Failed to create ZSTD encoder")?;
+    configure_threads(&mut zstd_encoder, options.threads)?;
+
+    let zstd_encoder = tarball::build_tarball(
+        zstd_encoder,
+        input_path,
+        options,
+        filter,
+        progress,
+        build_options,
+    )?;
+
+    drop(zstd_encoder.finish()?);
+
+    Ok(())
+}
 
 impl CompressionFormat for ZstdFormat {
     fn compress(
@@ -38,35 +93,7 @@ impl CompressionFormat for ZstdFormat {
         // create output file
         let mut underlying_file = File::create(output_path)
             .with_context(|| format!("failed to create output file: {}", output_path.display()))?;
-
-        let mut key_material: Option<Vec<u8>> = None;
-
-        // Handle password-based encryption
-        if let Some(password) = &options.password {
-            if !password.is_empty() {
-                let (derived_key, salt) = encryption::derive_key(password, None)
-                    .context("Failed to derive encryption key for ZSTD compression")?;
-
-                // Write magic header and salt
-                underlying_file
-                    .write_all(ENCRYPTED_ZSTD_MAGIC)
-                    .context("Failed to write encryption magic header")?;
-                underlying_file
-                    .write_all(&salt)
-                    .context("Failed to write encryption salt")?;
-
-                key_material = Some(derived_key);
-            }
-        }
-
-        // Set up compression parameters
         let zstd_level = if options.level == 0 { 3 } else { options.level };
-        let thread_count = if options.threads == 0 {
-            num_cpus::get() as u32
-        } else {
-            options.threads
-        };
-
         let build_options = tarball::BuildOptions {
             normalize_ownership: options.normalize_ownership,
             apply_filter_to_single_file: true,
@@ -74,49 +101,45 @@ impl CompressionFormat for ZstdFormat {
             set_mtime_for_single_file: true,
         };
 
-        // Handle encrypted vs unencrypted compression differently
-        if let Some(key) = key_material {
-            // Encrypted compression pipeline
+        // Handle password-based encryption
+        if let Some(password) = options
+            .password
+            .as_deref()
+            .filter(|password| !password.is_empty())
+        {
+            let (derived_key, salt) = encryption::derive_key(password, None)
+                .context("Failed to derive encryption key for ZSTD compression")?;
+
+            // Write magic header and salt
+            underlying_file
+                .write_all(ENCRYPTED_ZSTD_MAGIC)
+                .context("Failed to write encryption magic header")?;
+            underlying_file
+                .write_all(&salt)
+                .context("Failed to write encryption salt")?;
+
             let encrypting_writer =
-                EncryptingWriter::new(underlying_file, &key, DEFAULT_ENCRYPTION_CHUNK_SIZE)
+                EncryptingWriter::new(underlying_file, &derived_key, DEFAULT_ENCRYPTION_CHUNK_SIZE)
                     .context("Failed to create EncryptingWriter for ZSTD")?;
-            let mut zstd_encoder = zstd::Encoder::new(encrypting_writer, zstd_level)
-                .context("Failed to create ZSTD encoder for encrypted stream")?;
-
-            // Configure threading
-            if thread_count > 1 {
-                let _ = zstd_encoder.set_parameter(CParameter::NbWorkers(thread_count));
-            }
-
-            let zstd_encoder = tarball::build_tarball(
-                zstd_encoder,
+            compress_tarball(
+                encrypting_writer,
                 input_path,
+                zstd_level,
                 options,
                 filter,
                 progress,
                 build_options,
             )?;
-            let _inner = zstd_encoder.finish()?;
         } else {
-            // Standard unencrypted compression pipeline
-            let mut zstd_encoder = zstd::Encoder::new(underlying_file, zstd_level)
-                .context("Failed to create ZSTD encoder for unencrypted stream")?;
-
-            // Configure threading
-            if thread_count > 1 {
-                let _ = zstd_encoder.set_parameter(CParameter::NbWorkers(thread_count));
-            }
-
-            let zstd_encoder = tarball::build_tarball(
-                zstd_encoder,
+            compress_tarball(
+                underlying_file,
                 input_path,
+                zstd_level,
                 options,
                 filter,
                 progress,
                 build_options,
             )?;
-            let output_file = zstd_encoder.finish()?;
-            let _ = output_file; // The file is already written
         }
 
         let output_size = std::fs::metadata(output_path)?.len();

@@ -18,7 +18,7 @@ pub struct Cli {
     #[arg(short, long, global = true)]
     pub verbose: bool,
 
-    /// number of threads (0 = auto-detect)
+    /// number of threads (0 = auto-detect available parallelism)
     #[arg(short = 'j', long, global = true, default_value = "0")]
     pub threads: u32,
 }

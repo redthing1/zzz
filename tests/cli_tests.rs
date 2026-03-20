@@ -267,6 +267,26 @@ fn test_compress_with_custom_level() -> Result<()> {
 }
 
 #[test]
+fn test_compress_zstd_with_threads() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+    let source_file = temp_dir.path().join("threaded.txt");
+    let output_file = temp_dir.path().join("threaded.zst");
+
+    fs::write(&source_file, "Threaded zstd content. ".repeat(50_000))?;
+
+    zzz_cmd()
+        .args(["-j", "2", "compress", "-f", "zst", "-o"])
+        .arg(&output_file)
+        .arg(&source_file)
+        .assert()
+        .success();
+
+    assert!(output_file.exists());
+
+    Ok(())
+}
+
+#[test]
 fn test_compress_with_custom_excludes() -> Result<()> {
     let temp_dir = TempDir::new()?;
     let source_dir = temp_dir.path().join("source");

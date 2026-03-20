@@ -90,6 +90,31 @@ fn test_compression_performance_medium_file() -> Result<()> {
 }
 
 #[test]
+fn test_multithreaded_compression_configuration() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+    let source_file = temp_dir.path().join("threaded.txt");
+    let archive_path = temp_dir.path().join("threaded.zst");
+
+    create_test_file(&source_file, 1024 * 1024)?;
+
+    let options = CompressionOptions {
+        threads: 2,
+        ..Default::default()
+    };
+    let filter = FileFilter::new(true, &[])?;
+
+    let stats = ZstdFormat::compress(&source_file, &archive_path, &options, &filter, None)?;
+
+    assert!(archive_path.exists(), "archive should be created");
+    assert!(
+        stats.output_size > 0,
+        "archive should contain compressed data"
+    );
+
+    Ok(())
+}
+
+#[test]
 fn test_compression_levels_performance() -> Result<()> {
     let temp_dir = TempDir::new()?;
     let source_file = temp_dir.path().join("level_test.txt");

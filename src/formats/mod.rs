@@ -45,7 +45,7 @@ pub struct ArchiveEntry {
 #[derive(Debug, Clone)]
 pub struct CompressionOptions {
     pub level: i32,                  // 1-22, default 19
-    pub threads: u32,                // 0 = auto-detect CPU cores
+    pub threads: u32,                // 0 = auto-detect available parallelism
     pub normalize_permissions: bool, // security: normalize permissions
     pub normalize_ownership: bool,   // security: normalize ownership (uid/gid)
     pub strip_xattrs: bool,          // security: strip extended attributes (xattrs)
@@ -60,7 +60,7 @@ impl Default for CompressionOptions {
     fn default() -> Self {
         Self {
             level: 19,
-            threads: 0, // auto-detect
+            threads: 0, // auto-detect available parallelism
             normalize_permissions: true,
             normalize_ownership: true,
             strip_xattrs: true,
