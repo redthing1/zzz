@@ -38,7 +38,7 @@ fn test_compression_performance_small_file() -> Result<()> {
     create_test_file(&source_file, 1024)?;
 
     let options = CompressionOptions::default();
-    let filter = FileFilter::new(true, &[])?;
+    let filter = FileFilter::from_patterns(true, false, &[])?;
 
     let start = Instant::now();
     let stats = ZstdFormat::compress(&source_file, &archive_path, &options, &filter, None)?;
@@ -67,7 +67,7 @@ fn test_compression_performance_medium_file() -> Result<()> {
     create_test_file(&source_file, 1024 * 1024)?;
 
     let options = CompressionOptions::default();
-    let filter = FileFilter::new(true, &[])?;
+    let filter = FileFilter::from_patterns(true, false, &[])?;
 
     let start = Instant::now();
     let stats = ZstdFormat::compress(&source_file, &archive_path, &options, &filter, None)?;
@@ -101,7 +101,7 @@ fn test_multithreaded_compression_configuration() -> Result<()> {
         threads: 2,
         ..Default::default()
     };
-    let filter = FileFilter::new(true, &[])?;
+    let filter = FileFilter::from_patterns(true, false, &[])?;
 
     let stats = ZstdFormat::compress(&source_file, &archive_path, &options, &filter, None)?;
 
@@ -123,7 +123,7 @@ fn test_compression_levels_performance() -> Result<()> {
     let content = "Lorem ipsum dolor sit amet, consectetur adipiscing elit. ".repeat(2000);
     fs::write(&source_file, content)?;
 
-    let filter = FileFilter::new(true, &[])?;
+    let filter = FileFilter::from_patterns(true, false, &[])?;
     let levels = [1, 3, 9, 19, 22];
 
     println!("Compression level performance comparison:");
@@ -168,7 +168,7 @@ fn test_many_small_files_performance() -> Result<()> {
     create_test_directory(&source_dir, 100, 1024)?;
 
     let options = CompressionOptions::default();
-    let filter = FileFilter::new(true, &[])?;
+    let filter = FileFilter::from_patterns(true, false, &[])?;
 
     let start = Instant::now();
     let stats = ZstdFormat::compress(&source_dir, &archive_path, &options, &filter, None)?;
@@ -201,7 +201,7 @@ fn test_extraction_performance() -> Result<()> {
 
     // Compress first
     let options = CompressionOptions::default();
-    let filter = FileFilter::new(true, &[])?;
+    let filter = FileFilter::from_patterns(true, false, &[])?;
     ZstdFormat::compress(&source_dir, &archive_path, &options, &filter, None)?;
 
     // Time extraction
@@ -258,7 +258,7 @@ fn test_filtering_performance() -> Result<()> {
 
     let options = CompressionOptions::default();
     let custom_patterns = vec!["*.log".to_string()];
-    let filter = FileFilter::new(true, &custom_patterns)?;
+    let filter = FileFilter::from_patterns(true, false, &custom_patterns)?;
 
     let start = Instant::now();
     let stats = ZstdFormat::compress(&source_dir, &archive_path, &options, &filter, None)?;
@@ -309,7 +309,7 @@ fn test_listing_performance() -> Result<()> {
     create_test_directory(&source_dir, 500, 100)?; // 500 files of 100 bytes each
 
     let options = CompressionOptions::default();
-    let filter = FileFilter::new(true, &[])?;
+    let filter = FileFilter::from_patterns(true, false, &[])?;
     ZstdFormat::compress(&source_dir, &archive_path, &options, &filter, None)?;
 
     // Time listing operation
@@ -354,7 +354,7 @@ fn test_memory_efficiency_large_directory() -> Result<()> {
     }
 
     let options = CompressionOptions::default();
-    let filter = FileFilter::new(true, &[])?;
+    let filter = FileFilter::from_patterns(true, false, &[])?;
 
     // This should complete without excessive memory usage
     let start = Instant::now();

@@ -1,16 +1,11 @@
 //! utility functions for file size calculations, archive traversal, and formatting
 
+use crate::policy::SymlinkPolicy;
 use crate::Result;
 use anyhow::Context;
 use filetime::FileTime;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SymlinkHandling {
-    Skip,
-    Follow,
-}
 
 #[derive(Debug, Clone)]
 pub struct ArchiveInputSummary {
@@ -232,20 +227,8 @@ pub fn calculate_dir_size(path: &Path) -> Result<u64> {
     Ok(total)
 }
 
-fn symlink_handling(follow_symlinks: bool) -> SymlinkHandling {
-    if follow_symlinks {
-        SymlinkHandling::Follow
-    } else {
-        SymlinkHandling::Skip
-    }
-}
-
-fn archive_root_guard(
-    path: &Path,
-    handling: SymlinkHandling,
-    allow_symlink_escape: bool,
-) -> Result<Option<PathBuf>> {
-    if handling == SymlinkHandling::Follow && !allow_symlink_escape {
+fn archive_root_guard(path: &Path, symlink_policy: SymlinkPolicy) -> Result<Option<PathBuf>> {
+    if matches!(symlink_policy, SymlinkPolicy::FollowWithinRoot) {
         return Ok(Some(std::fs::canonicalize(path).with_context(|| {
             format!("Failed to resolve input root '{}'", path.display())
         })?));
@@ -256,7 +239,7 @@ fn archive_root_guard(
 
 fn validate_root_symlink(
     path: &Path,
-    handling: SymlinkHandling,
+    symlink_policy: SymlinkPolicy,
     canonical_root: Option<&PathBuf>,
 ) -> Result<()> {
     let metadata = std::fs::symlink_metadata(path)?;
@@ -264,12 +247,12 @@ fn validate_root_symlink(
         return Ok(());
     }
 
-    match handling {
-        SymlinkHandling::Skip => Err(anyhow::anyhow!(
+    match symlink_policy {
+        SymlinkPolicy::Skip => Err(anyhow::anyhow!(
             "input path '{}' is a symlink; use --follow-symlinks",
             path.display()
         )),
-        SymlinkHandling::Follow => {
+        SymlinkPolicy::FollowWithinRoot | SymlinkPolicy::FollowAllowEscape => {
             if let Some(root) = canonical_root {
                 ensure_symlink_within_root(root, path)?;
             }
@@ -282,12 +265,10 @@ fn validate_root_symlink(
 pub fn walk_archive_input(
     path: &Path,
     filter: &crate::filter::FileFilter,
-    follow_symlinks: bool,
-    allow_symlink_escape: bool,
+    symlink_policy: SymlinkPolicy,
 ) -> Result<ArchiveWalk> {
-    let handling = symlink_handling(follow_symlinks);
-    let canonical_root = archive_root_guard(path, handling, allow_symlink_escape)?;
-    validate_root_symlink(path, handling, canonical_root.as_ref())?;
+    let canonical_root = archive_root_guard(path, symlink_policy)?;
+    validate_root_symlink(path, symlink_policy, canonical_root.as_ref())?;
 
     let mut entries = Vec::new();
     let mut total = 0;
@@ -312,15 +293,15 @@ pub fn walk_archive_input(
         });
     }
 
-    for entry in filter.walk_entries_with_follow(path, follow_symlinks) {
+    for entry in filter.walk_entries_with_follow(path, symlink_policy.follows_targets()) {
         let entry = entry?;
         if entry.path_is_symlink() {
-            match handling {
-                SymlinkHandling::Skip => {
+            match symlink_policy {
+                SymlinkPolicy::Skip => {
                     skipped_symlinks += 1;
                     continue;
                 }
-                SymlinkHandling::Follow => {
+                SymlinkPolicy::FollowWithinRoot | SymlinkPolicy::FollowAllowEscape => {
                     if let Some(root) = &canonical_root {
                         ensure_symlink_within_root(root, entry.path())?;
                     }
@@ -345,10 +326,9 @@ pub fn walk_archive_input(
 pub fn summarize_archive_input(
     path: &Path,
     filter: &crate::filter::FileFilter,
-    follow_symlinks: bool,
-    allow_symlink_escape: bool,
+    symlink_policy: SymlinkPolicy,
 ) -> Result<ArchiveInputSummary> {
-    let walk = walk_archive_input(path, filter, follow_symlinks, allow_symlink_escape)?;
+    let walk = walk_archive_input(path, filter, symlink_policy)?;
     Ok(ArchiveInputSummary {
         total_size: walk.total_size,
         skipped_symlinks: walk.skipped_symlinks,
@@ -359,10 +339,9 @@ pub fn summarize_archive_input(
 pub fn calculate_directory_size(
     path: &Path,
     filter: &crate::filter::FileFilter,
-    follow_symlinks: bool,
-    allow_symlink_escape: bool,
+    symlink_policy: SymlinkPolicy,
 ) -> Result<u64> {
-    Ok(summarize_archive_input(path, filter, follow_symlinks, allow_symlink_escape)?.total_size)
+    Ok(summarize_archive_input(path, filter, symlink_policy)?.total_size)
 }
 
 /// format bytes in human-readable format

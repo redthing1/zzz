@@ -1,5 +1,6 @@
 //! compression format abstraction
 
+use crate::policy::SymlinkPolicy;
 use crate::Result;
 use anyhow::Context;
 use std::path::Path;
@@ -44,15 +45,14 @@ pub struct ArchiveEntry {
 /// compression options for creating archives
 #[derive(Debug, Clone)]
 pub struct CompressionOptions {
-    pub level: i32,                  // 1-22, default 19
-    pub threads: u32,                // 0 = auto-detect available parallelism
-    pub normalize_permissions: bool, // security: normalize permissions
-    pub normalize_ownership: bool,   // security: normalize ownership (uid/gid)
-    pub strip_xattrs: bool,          // security: strip extended attributes (xattrs)
-    pub strip_timestamps: bool,      // security: strip filesystem timestamps
-    pub follow_symlinks: bool,       // follow symlinks when walking input
-    pub allow_symlink_escape: bool,  // allow symlink targets outside input root
-    pub deterministic: bool,         // sort files for reproducible archives
+    pub level: i32,   // 1-22, default 19
+    pub threads: u32, // 0 = auto-detect available parallelism
+    pub preserve_permissions: bool,
+    pub preserve_ownership: bool,
+    pub preserve_xattrs: bool,
+    pub preserve_timestamps: bool,
+    pub symlink_policy: SymlinkPolicy,
+    pub deterministic: bool, // sort files for reproducible archives
     pub password: Option<String>,
 }
 
@@ -61,12 +61,11 @@ impl Default for CompressionOptions {
         Self {
             level: 19,
             threads: 0, // auto-detect available parallelism
-            normalize_permissions: true,
-            normalize_ownership: true,
-            strip_xattrs: true,
-            strip_timestamps: false,
-            follow_symlinks: false,
-            allow_symlink_escape: false,
+            preserve_permissions: true,
+            preserve_ownership: false,
+            preserve_xattrs: false,
+            preserve_timestamps: true,
+            symlink_policy: SymlinkPolicy::Skip,
             deterministic: true,
             password: None,
         }
@@ -78,8 +77,8 @@ impl Default for CompressionOptions {
 pub struct ExtractionOptions {
     pub overwrite: bool,
     pub strip_components: usize,
-    pub strip_xattrs: bool,
-    pub strip_timestamps: bool,
+    pub preserve_xattrs: bool,
+    pub preserve_timestamps: bool,
     pub preserve_permissions: bool,
     pub preserve_ownership: bool,
     pub password: Option<String>,
@@ -90,9 +89,9 @@ impl Default for ExtractionOptions {
         Self {
             overwrite: false,
             strip_components: 0,
-            strip_xattrs: true,
-            strip_timestamps: false,
-            preserve_permissions: false,
+            preserve_xattrs: false,
+            preserve_timestamps: true,
+            preserve_permissions: true,
             preserve_ownership: false,
             password: None,
         }

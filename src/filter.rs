@@ -1,5 +1,6 @@
 //! file filtering system with comprehensive garbage file exclusion
 
+use crate::policy::FilterPolicy;
 use crate::Result;
 use glob::Pattern;
 use once_cell::sync::Lazy;
@@ -97,7 +98,7 @@ pub const GARBAGE_FILES: &[&str] = &[
     ".*.sw?", // vim swap file pattern
 ];
 
-/// common sensitive files and directories for redact mode
+/// common sensitive files and directories for explicit exclusion
 pub const SENSITIVE_FILES: &[&str] = &[
     ".env",
     ".env.*",
@@ -132,8 +133,16 @@ static COMPILED_GARBAGE_PATTERNS: Lazy<Vec<Pattern>> = Lazy::new(|| {
         .collect()
 });
 
+static COMPILED_SENSITIVE_PATTERNS: Lazy<Vec<Pattern>> = Lazy::new(|| {
+    SENSITIVE_FILES
+        .iter()
+        .filter_map(|s| Pattern::new(s).ok())
+        .collect()
+});
+
 pub struct FileFilter {
-    use_defaults: bool,
+    use_default_excludes: bool,
+    exclude_sensitive: bool,
     custom_excludes: Vec<Pattern>,
 }
 
@@ -184,16 +193,30 @@ impl FileFilter {
         false
     }
 
-    /// create new file filter with optional custom patterns
-    pub fn new(use_defaults: bool, custom_patterns: &[String]) -> Result<Self> {
+    /// create a new file filter from the resolved filter policy
+    pub fn new(policy: &FilterPolicy) -> Result<Self> {
         let mut custom_excludes = Vec::new();
-        for pattern in custom_patterns {
+        for pattern in &policy.patterns {
             custom_excludes.push(Pattern::new(pattern)?);
         }
         Ok(Self {
-            use_defaults,
+            use_default_excludes: policy.use_default_excludes,
+            exclude_sensitive: policy.exclude_sensitive,
             custom_excludes,
         })
+    }
+
+    /// create a file filter directly from simple exclude settings
+    pub fn from_patterns(
+        use_default_excludes: bool,
+        exclude_sensitive: bool,
+        custom_patterns: &[String],
+    ) -> Result<Self> {
+        Self::new(&FilterPolicy::new(
+            use_default_excludes,
+            exclude_sensitive,
+            custom_patterns.to_vec(),
+        ))
     }
 
     /// check if a path should be excluded from archiving
@@ -208,8 +231,16 @@ impl FileFilter {
         }
 
         // check default garbage files if enabled
-        if self.use_defaults {
+        if self.use_default_excludes {
             for pattern in &*COMPILED_GARBAGE_PATTERNS {
+                if pattern.matches(filename) {
+                    return true;
+                }
+            }
+        }
+
+        if self.exclude_sensitive {
+            for pattern in &*COMPILED_SENSITIVE_PATTERNS {
                 if pattern.matches(filename) {
                     return true;
                 }
@@ -234,8 +265,14 @@ impl FileFilter {
             return true;
         }
 
-        if self.use_defaults
+        if self.use_default_excludes
             && Self::matches_patterns(&COMPILED_GARBAGE_PATTERNS, filename, relative_path)
+        {
+            return true;
+        }
+
+        if self.exclude_sensitive
+            && Self::matches_patterns(&COMPILED_SENSITIVE_PATTERNS, filename, relative_path)
         {
             return true;
         }
@@ -292,7 +329,7 @@ mod tests {
 
     #[test]
     fn test_file_filter_with_defaults() -> Result<()> {
-        let filter = FileFilter::new(true, &[])?;
+        let filter = FileFilter::from_patterns(true, false, &[])?;
 
         // Test default garbage files
         assert!(filter.should_exclude(Path::new(".DS_Store")));
@@ -329,7 +366,7 @@ mod tests {
 
     #[test]
     fn test_file_filter_without_defaults() -> Result<()> {
-        let filter = FileFilter::new(false, &[])?;
+        let filter = FileFilter::from_patterns(false, false, &[])?;
 
         // Default garbage files should NOT be excluded when defaults are disabled
         assert!(!filter.should_exclude(Path::new(".DS_Store")));
@@ -346,7 +383,7 @@ mod tests {
             "test_*".to_string(),
             "secret.txt".to_string(),
         ];
-        let filter = FileFilter::new(true, &custom_patterns)?;
+        let filter = FileFilter::from_patterns(true, false, &custom_patterns)?;
 
         // Test custom patterns
         assert!(filter.should_exclude(Path::new("debug.log")));
@@ -363,7 +400,7 @@ mod tests {
     #[test]
     fn test_custom_excludes_override_defaults() -> Result<()> {
         let custom_patterns = vec!["*.rs".to_string()];
-        let filter = FileFilter::new(true, &custom_patterns)?;
+        let filter = FileFilter::from_patterns(true, false, &custom_patterns)?;
 
         // Custom patterns should work
         assert!(filter.should_exclude(Path::new("main.rs")));
@@ -384,7 +421,7 @@ mod tests {
             .iter()
             .map(|pattern| (*pattern).to_string())
             .collect::<Vec<_>>();
-        let filter = FileFilter::new(true, &custom_patterns)?;
+        let filter = FileFilter::from_patterns(true, false, &custom_patterns)?;
 
         assert!(filter.should_exclude_relative(Path::new(".env")));
         assert!(filter.should_exclude_relative(Path::new("config/.env.local")));
@@ -401,7 +438,7 @@ mod tests {
 
     #[test]
     fn test_path_based_matching() -> Result<()> {
-        let filter = FileFilter::new(true, &[])?;
+        let filter = FileFilter::from_patterns(true, false, &[])?;
         let root = Path::new("project");
 
         assert!(filter.should_exclude_path(root, Path::new("project/.git/config")));
@@ -415,13 +452,13 @@ mod tests {
     #[test]
     fn test_invalid_pattern() {
         // Test that invalid glob patterns return an error
-        let result = FileFilter::new(true, &["[".to_string()]);
+        let result = FileFilter::from_patterns(true, false, &["[".to_string()]);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_path_vs_filename_matching() -> Result<()> {
-        let filter = FileFilter::new(true, &[])?;
+        let filter = FileFilter::from_patterns(true, false, &[])?;
 
         // Test that patterns match on filename, not full path
         assert!(filter.should_exclude(Path::new("some/path/.DS_Store")));

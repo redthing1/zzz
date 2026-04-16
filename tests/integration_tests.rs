@@ -46,7 +46,7 @@ fn test_compress_and_extract_single_file() -> Result<()> {
 
     // Compress
     let options = CompressionOptions::default();
-    let filter = FileFilter::new(true, &[])?;
+    let filter = FileFilter::from_patterns(true, false, &[])?;
     let stats = ZstdFormat::compress(&source_file, &archive_path, &options, &filter, None)?;
 
     // Verify archive was created
@@ -83,7 +83,7 @@ fn test_compress_and_extract_directory() -> Result<()> {
 
     // Compress with default filtering (should exclude .DS_Store, thumbs.db)
     let options = CompressionOptions::default();
-    let filter = FileFilter::new(true, &[])?;
+    let filter = FileFilter::from_patterns(true, false, &[])?;
     let stats = ZstdFormat::compress(&source_dir, &archive_path, &options, &filter, None)?;
 
     // Verify compression
@@ -136,7 +136,7 @@ fn test_list_archive_contents() -> Result<()> {
 
     // Compress
     let options = CompressionOptions::default();
-    let filter = FileFilter::new(true, &[])?;
+    let filter = FileFilter::from_patterns(true, false, &[])?;
     ZstdFormat::compress(&source_dir, &archive_path, &options, &filter, None)?;
 
     // List contents
@@ -167,7 +167,7 @@ fn test_custom_compression_levels() -> Result<()> {
     let content = "This is test content that should compress well. ".repeat(100);
     fs::write(&source_file, &content)?;
 
-    let filter = FileFilter::new(true, &[])?;
+    let filter = FileFilter::from_patterns(true, false, &[])?;
 
     // Test different compression levels
     for level in [1, 3, 19, 22] {
@@ -205,7 +205,7 @@ fn test_custom_exclude_patterns() -> Result<()> {
     // Compress with custom excludes
     let options = CompressionOptions::default();
     let custom_patterns = vec!["*.log".to_string(), "test_*".to_string()];
-    let filter = FileFilter::new(true, &custom_patterns)?;
+    let filter = FileFilter::from_patterns(true, false, &custom_patterns)?;
     ZstdFormat::compress(&source_dir, &archive_path, &options, &filter, None)?;
 
     // Extract and verify filtering
@@ -239,7 +239,7 @@ fn test_no_default_excludes() -> Result<()> {
 
     // Compress with no default excludes
     let options = CompressionOptions::default();
-    let filter = FileFilter::new(false, &[])?; // Disable default excludes
+    let filter = FileFilter::from_patterns(false, false, &[])?; // Disable default excludes
     ZstdFormat::compress(&source_dir, &archive_path, &options, &filter, None)?;
 
     // Extract and verify no filtering occurred
@@ -268,7 +268,7 @@ fn test_relative_directory_preserves_root() -> Result<()> {
     let extract_dir = temp_dir.path().join("extract");
 
     let options = CompressionOptions::default();
-    let filter = FileFilter::new(true, &[])?;
+    let filter = FileFilter::from_patterns(true, false, &[])?;
     ZstdFormat::compress(relative_source, &archive_path, &options, &filter, None)?;
 
     fs::create_dir(&extract_dir)?;
@@ -295,7 +295,7 @@ fn test_directory_excludes_are_pruned() -> Result<()> {
     let extract_dir = temp_dir.path().join("extract");
 
     let options = CompressionOptions::default();
-    let filter = FileFilter::new(true, &[])?;
+    let filter = FileFilter::from_patterns(true, false, &[])?;
     ZstdFormat::compress(&source_dir, &archive_path, &options, &filter, None)?;
 
     fs::create_dir(&extract_dir)?;
@@ -320,7 +320,7 @@ fn test_overwrite_protection() -> Result<()> {
     // Create source and archive
     fs::write(&source_file, "original content")?;
     let options = CompressionOptions::default();
-    let filter = FileFilter::new(true, &[])?;
+    let filter = FileFilter::from_patterns(true, false, &[])?;
     ZstdFormat::compress(&source_file, &archive_path, &options, &filter, None)?;
 
     // Extract once

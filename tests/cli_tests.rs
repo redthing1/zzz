@@ -43,18 +43,17 @@ fn test_compress_help() {
         .assert()
         .success()
         .stdout(predicate::str::contains(
-            "compress files/directories (supports",
+            "compress files/directories (defaults:",
         ))
         .stdout(predicate::str::contains("--level"))
         .stdout(predicate::str::contains("--output"))
         .stdout(predicate::str::contains("--progress"))
         .stdout(predicate::str::contains("--exclude"))
-        .stdout(predicate::str::contains("--keep-xattrs"))
-        .stdout(predicate::str::contains("--keep-permissions"))
-        .stdout(predicate::str::contains("--keep-ownership"))
+        .stdout(predicate::str::contains("--preserve-xattrs"))
+        .stdout(predicate::str::contains("--preserve-ownership"))
         .stdout(predicate::str::contains("--follow-symlinks"))
         .stdout(predicate::str::contains("--allow-symlink-escape"))
-        .stdout(predicate::str::contains("--redact"))
+        .stdout(predicate::str::contains("--exclude-sensitive"))
         .stdout(predicate::str::contains("--strip-timestamps"))
         .stdout(predicate::str::contains("--overwrite"));
 }
@@ -65,12 +64,11 @@ fn test_extract_help() {
         .args(["extract", "--help"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("extract archives"))
+        .stdout(predicate::str::contains("extract archives (defaults:"))
         .stdout(predicate::str::contains("--progress"))
         .stdout(predicate::str::contains("--strip-components"))
-        .stdout(predicate::str::contains("--keep-xattrs"))
-        .stdout(predicate::str::contains("--keep-permissions"))
-        .stdout(predicate::str::contains("--keep-ownership"))
+        .stdout(predicate::str::contains("--preserve-xattrs"))
+        .stdout(predicate::str::contains("--preserve-ownership"))
         .stdout(predicate::str::contains("--strip-timestamps"))
         .stdout(predicate::str::contains("--overwrite"));
 }
@@ -363,17 +361,17 @@ fn test_compress_with_custom_excludes() -> Result<()> {
 }
 
 #[test]
-fn test_redact_excludes_sensitive_files() -> Result<()> {
+fn test_exclude_sensitive_files() -> Result<()> {
     let temp_dir = TempDir::new()?;
     let source_dir = temp_dir.path().join("source");
-    let output_file = temp_dir.path().join("redact.zst");
+    let output_file = temp_dir.path().join("exclude_sensitive.zst");
 
     fs::create_dir(&source_dir)?;
     fs::write(source_dir.join(".env"), "SECRET=1")?;
     fs::write(source_dir.join("keep.txt"), "safe")?;
 
     zzz_cmd()
-        .args(["compress", "--redact", "-f", "zst", "-o"])
+        .args(["compress", "--exclude-sensitive", "-f", "zst", "-o"])
         .arg(&output_file)
         .arg(&source_dir)
         .assert()
@@ -391,17 +389,17 @@ fn test_redact_excludes_sensitive_files() -> Result<()> {
 }
 
 #[test]
-fn test_redact_excludes_sensitive_files_without_defaults() -> Result<()> {
+fn test_exclude_sensitive_files_without_defaults() -> Result<()> {
     let temp_dir = TempDir::new()?;
     let source_dir = temp_dir.path().join("source");
-    let output_file = temp_dir.path().join("redact_no_defaults.zst");
+    let output_file = temp_dir.path().join("exclude_sensitive_no_defaults.zst");
 
     fs::create_dir(&source_dir)?;
     fs::write(source_dir.join(".env"), "SECRET=1")?;
     fs::write(source_dir.join("keep.txt"), "safe")?;
 
     zzz_cmd()
-        .args(["compress", "--redact", "-E", "-f", "zst", "-o"])
+        .args(["compress", "--exclude-sensitive", "-E", "-f", "zst", "-o"])
         .arg(&output_file)
         .arg(&source_dir)
         .assert()

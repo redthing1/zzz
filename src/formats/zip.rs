@@ -22,8 +22,8 @@ use zip::{write::FileOptions, CompressionMethod, ZipArchive, ZipWriter};
 
 pub struct ZipFormat;
 
-fn zip_last_modified(metadata: &std::fs::Metadata, strip_timestamps: bool) -> zip::DateTime {
-    if strip_timestamps {
+fn zip_last_modified(metadata: &std::fs::Metadata, preserve_timestamps: bool) -> zip::DateTime {
+    if !preserve_timestamps {
         return zip::DateTime::default();
     }
 
@@ -42,12 +42,8 @@ impl CompressionFormat for ZipFormat {
         filter: &FileFilter,
         progress: Option<&Progress>,
     ) -> Result<CompressionStats> {
-        let input_size = utils::calculate_directory_size(
-            input_path,
-            filter,
-            options.follow_symlinks,
-            options.allow_symlink_escape,
-        )?;
+        let input_size =
+            utils::calculate_directory_size(input_path, filter, options.symlink_policy)?;
 
         let output_file = File::create(output_path)
             .with_context(|| format!("Failed to create output file {}", output_path.display()))?;
@@ -77,10 +73,8 @@ impl CompressionFormat for ZipFormat {
                     input_path.display()
                 )
             })?;
-            let zip_time = zip_last_modified(&metadata, options.strip_timestamps);
-            let permissions = if options.normalize_permissions {
-                0o644
-            } else {
+            let zip_time = zip_last_modified(&metadata, options.preserve_timestamps);
+            let permissions = if options.preserve_permissions {
                 #[cfg(unix)]
                 {
                     metadata.permissions().mode()
@@ -89,6 +83,8 @@ impl CompressionFormat for ZipFormat {
                 {
                     0o644
                 }
+            } else {
+                0o644
             };
             let current_file_options = base_file_options
                 .last_modified_time(zip_time)
@@ -125,13 +121,8 @@ impl CompressionFormat for ZipFormat {
             }
 
             let base_path = input_path.parent().unwrap_or(input_path);
-            let mut entries = utils::walk_archive_input(
-                input_path,
-                filter,
-                options.follow_symlinks,
-                options.allow_symlink_escape,
-            )?
-            .entries;
+            let mut entries =
+                utils::walk_archive_input(input_path, filter, options.symlink_policy)?.entries;
 
             // Sort for deterministic archives
             if options.deterministic {
@@ -146,10 +137,8 @@ impl CompressionFormat for ZipFormat {
                 let path_str = utils::normalize_archive_path(relative_path);
 
                 let metadata = path.metadata()?;
-                let zip_time = zip_last_modified(&metadata, options.strip_timestamps);
-                let permissions = if options.normalize_permissions {
-                    0o644
-                } else {
+                let zip_time = zip_last_modified(&metadata, options.preserve_timestamps);
+                let permissions = if options.preserve_permissions {
                     #[cfg(unix)]
                     {
                         metadata.permissions().mode()
@@ -158,6 +147,8 @@ impl CompressionFormat for ZipFormat {
                     {
                         0o644
                     }
+                } else {
+                    0o644
                 };
                 let current_file_options = base_file_options
                     .last_modified_time(zip_time)
@@ -177,9 +168,7 @@ impl CompressionFormat for ZipFormat {
                         progress.set_position(processed_size);
                     }
                 } else if path.is_dir() {
-                    let permissions = if options.normalize_permissions {
-                        0o755
-                    } else {
+                    let permissions = if options.preserve_permissions {
                         #[cfg(unix)]
                         {
                             metadata.permissions().mode()
@@ -188,6 +177,8 @@ impl CompressionFormat for ZipFormat {
                         {
                             0o755
                         }
+                    } else {
+                        0o755
                     };
                     let current_file_options = base_file_options
                         .last_modified_time(zip_time)
@@ -244,7 +235,7 @@ impl CompressionFormat for ZipFormat {
             else {
                 continue;
             };
-            let entry_mtime = if options.strip_timestamps || file.is_dir() {
+            let entry_mtime = if !options.preserve_timestamps || file.is_dir() {
                 None
             } else {
                 file.last_modified()

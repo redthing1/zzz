@@ -15,7 +15,7 @@ use std::{fs::File, path::Path};
 pub struct SevenZFormat;
 
 fn sanitize_entry_timestamps(entry: &mut SevenZArchiveEntry, options: &CompressionOptions) {
-    if options.strip_timestamps {
+    if !options.preserve_timestamps {
         entry.has_creation_date = false;
         entry.has_last_modified_date = false;
         entry.has_access_date = false;
@@ -30,12 +30,8 @@ impl CompressionFormat for SevenZFormat {
         filter: &FileFilter,
         progress: Option<&Progress>,
     ) -> Result<CompressionStats> {
-        let input_size = utils::calculate_directory_size(
-            input_path,
-            filter,
-            options.follow_symlinks,
-            options.allow_symlink_escape,
-        )?;
+        let input_size =
+            utils::calculate_directory_size(input_path, filter, options.symlink_policy)?;
 
         let mut sz = SevenZWriter::create(output_path).with_context(|| {
             format!(
@@ -98,13 +94,8 @@ impl CompressionFormat for SevenZFormat {
         } else {
             // Directory compression - preserve directory structure like our other formats
             let base_path = input_path.parent().unwrap_or(input_path);
-            let mut entries = utils::walk_archive_input(
-                input_path,
-                filter,
-                options.follow_symlinks,
-                options.allow_symlink_escape,
-            )?
-            .entries;
+            let mut entries =
+                utils::walk_archive_input(input_path, filter, options.symlink_policy)?.entries;
 
             // Sort for deterministic archives
             if options.deterministic {
@@ -244,7 +235,7 @@ impl CompressionFormat for SevenZFormat {
                 std::io::copy(reader, &mut output_file)?;
                 drop(output_file);
 
-                if !options.strip_timestamps && entry.has_last_modified_date {
+                if options.preserve_timestamps && entry.has_last_modified_date {
                     let system_time = std::time::SystemTime::from(entry.last_modified_date);
                     utils::apply_mtime(&target_path, system_time)
                         .map_err(|e| std::io::Error::other(e.to_string()))?;

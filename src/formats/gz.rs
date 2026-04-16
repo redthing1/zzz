@@ -46,7 +46,7 @@ fn raw_output_name(path: &Path) -> Option<String> {
 }
 
 fn gzip_mtime(path: &Path, options: &CompressionOptions) -> u32 {
-    if options.strip_timestamps {
+    if !options.preserve_timestamps {
         return 0;
     }
 
@@ -71,12 +71,8 @@ impl CompressionFormat for GzipFormat {
         filter: &FileFilter,
         progress: Option<&Progress>,
     ) -> Result<CompressionStats> {
-        let input_size = utils::calculate_directory_size(
-            input_path,
-            filter,
-            options.follow_symlinks,
-            options.allow_symlink_escape,
-        )?;
+        let input_size =
+            utils::calculate_directory_size(input_path, filter, options.symlink_policy)?;
 
         // Map compression level (1-22) to gzip level (0-9)
         let gzip_level = (((options.level as f32 / 22.0) * 9.0) as u32).clamp(0, 9);
@@ -137,7 +133,6 @@ impl CompressionFormat for GzipFormat {
                     filter,
                     progress,
                     tarball::BuildOptions {
-                        normalize_ownership: options.normalize_ownership,
                         apply_filter_to_single_file: true,
                         directory_slash: false,
                         set_mtime_for_single_file: true,
@@ -164,7 +159,6 @@ impl CompressionFormat for GzipFormat {
                 filter,
                 progress,
                 tarball::BuildOptions {
-                    normalize_ownership: options.normalize_ownership,
                     apply_filter_to_single_file: true,
                     directory_slash: false,
                     set_mtime_for_single_file: true,
@@ -218,7 +212,7 @@ impl CompressionFormat for GzipFormat {
                 format!("Failed to open archive file {}", archive_path.display())
             })?;
             let mut decoder = GzDecoder::new(ProgressReader::new(file, progress));
-            let mtime = if options.strip_timestamps {
+            let mtime = if !options.preserve_timestamps {
                 None
             } else {
                 decoder

@@ -5,9 +5,11 @@ use std::process;
 use zzz_arc::{
     cli::{Cli, Commands},
     compress, extract,
-    filter::FileFilter,
-    formats::{CompressionFormat, CompressionOptions, ExtractionOptions},
+    formats::CompressionFormat,
     list,
+    policy::{
+        build_filter, CompressPolicy, CompressPolicyInputs, ExtractPolicy, ExtractPolicyInputs,
+    },
 };
 
 fn main() {
@@ -26,26 +28,19 @@ fn run(cli: Cli) -> zzz_arc::Result<()> {
             output,
             level,
             progress,
-            mut exclude,
-            keep_xattrs,
-            keep_permissions,
-            keep_ownership,
+            exclude,
+            preserve_xattrs,
+            preserve_ownership,
             follow_symlinks,
             allow_symlink_escape,
-            redact,
             strip_timestamps,
             no_default_excludes,
+            exclude_sensitive,
             format,
             overwrite,
             password,
         } => {
             let output_path = Cli::get_output_path(&input, output, format);
-
-            if allow_symlink_escape && !follow_symlinks {
-                return Err(anyhow::anyhow!(
-                    "--allow-symlink-escape requires --follow-symlinks"
-                ));
-            }
 
             // check if output already exists and prompt user
             if output_path.exists() && !overwrite {
@@ -59,37 +54,25 @@ fn run(cli: Cli) -> zzz_arc::Result<()> {
                 }
             }
 
-            let mut options = CompressionOptions {
+            let policy = CompressPolicy::resolve(CompressPolicyInputs {
                 level,
                 threads: cli.threads,
                 password,
-                normalize_permissions: !keep_permissions,
-                normalize_ownership: !keep_ownership,
-                strip_xattrs: !keep_xattrs,
+                preserve_ownership,
+                preserve_xattrs,
                 strip_timestamps,
                 follow_symlinks,
                 allow_symlink_escape,
-                ..Default::default()
-            };
-            if redact {
-                options.normalize_permissions = true;
-                options.normalize_ownership = true;
-                options.strip_xattrs = true;
-                options.strip_timestamps = true;
-                options.deterministic = true;
-                exclude.extend(
-                    zzz_arc::filter::SENSITIVE_FILES
-                        .iter()
-                        .map(|pattern| (*pattern).to_string()),
-                );
-            }
-
-            let filter = FileFilter::new(!no_default_excludes, &exclude)?;
+                exclude_sensitive,
+                use_default_excludes: !no_default_excludes,
+                exclude_patterns: exclude,
+            })?;
+            let filter = build_filter(&policy.filters)?;
 
             let stats = compress::compress(
                 &input,
                 &output_path,
-                options,
+                policy.options,
                 filter,
                 progress,
                 cli.verbose,
@@ -113,26 +96,30 @@ fn run(cli: Cli) -> zzz_arc::Result<()> {
             directory,
             progress,
             strip_components,
-            keep_xattrs,
+            preserve_xattrs,
             strip_timestamps,
-            keep_permissions,
-            keep_ownership,
+            preserve_ownership,
             overwrite,
             password,
         } => {
             let extract_dir = Cli::get_extract_dir(destination, directory);
 
-            let options = ExtractionOptions {
+            let policy = ExtractPolicy::resolve(ExtractPolicyInputs {
                 overwrite,
                 strip_components,
-                strip_xattrs: !keep_xattrs,
-                strip_timestamps,
-                preserve_permissions: keep_permissions,
-                preserve_ownership: keep_ownership,
                 password,
-            };
+                preserve_ownership,
+                preserve_xattrs,
+                strip_timestamps,
+            });
 
-            extract::extract(&archive, &extract_dir, options, progress, cli.verbose)?;
+            extract::extract(
+                &archive,
+                &extract_dir,
+                policy.options,
+                progress,
+                cli.verbose,
+            )?;
         }
 
         Commands::List { archive } => {

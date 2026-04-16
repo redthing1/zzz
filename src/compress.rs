@@ -40,12 +40,8 @@ pub fn compress(
     }
 
     // calculate total size for progress tracking
-    let input_summary = crate::utils::summarize_archive_input(
-        input_path,
-        &filter,
-        options.follow_symlinks,
-        options.allow_symlink_escape,
-    )?;
+    let input_summary =
+        crate::utils::summarize_archive_input(input_path, &filter, options.symlink_policy)?;
     if input_summary.skipped_symlinks > 0 {
         eprintln!(
             "warning: skipped {} symlink entries; use --follow-symlinks",

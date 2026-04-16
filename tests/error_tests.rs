@@ -6,6 +6,7 @@ use tempfile::TempDir;
 use zzz_arc::filter::FileFilter;
 use zzz_arc::formats::zstd::ZstdFormat;
 use zzz_arc::formats::{CompressionFormat, CompressionOptions, ExtractionOptions};
+use zzz_arc::policy::SymlinkPolicy;
 
 type Result<T> = anyhow::Result<T>;
 
@@ -16,7 +17,7 @@ fn test_compress_nonexistent_file() {
     let output = temp_dir.path().join("output.zst");
 
     let options = CompressionOptions::default();
-    let filter = FileFilter::new(true, &[]).unwrap();
+    let filter = FileFilter::from_patterns(true, false, &[]).unwrap();
 
     let result = ZstdFormat::compress(&nonexistent, &output, &options, &filter, None);
     assert!(result.is_err());
@@ -103,7 +104,7 @@ fn test_compress_invalid_output_directory() -> Result<()> {
     fs::write(&source_file, "test content")?;
 
     let options = CompressionOptions::default();
-    let filter = FileFilter::new(true, &[])?;
+    let filter = FileFilter::from_patterns(true, false, &[])?;
 
     let result = ZstdFormat::compress(&source_file, &invalid_output, &options, &filter, None);
     assert!(result.is_err());
@@ -124,7 +125,7 @@ fn test_extract_to_readonly_directory() -> Result<()> {
     // Create and compress file
     fs::write(&source_file, "test content")?;
     let options = CompressionOptions::default();
-    let filter = FileFilter::new(true, &[])?;
+    let filter = FileFilter::from_patterns(true, false, &[])?;
     ZstdFormat::compress(&source_file, &archive_path, &options, &filter, None)?;
 
     // Create readonly directory (platform-dependent behavior)
@@ -174,7 +175,7 @@ fn test_overwrite_protection() -> Result<()> {
     // Create and compress file
     fs::write(&source_file, "original")?;
     let options = CompressionOptions::default();
-    let filter = FileFilter::new(true, &[])?;
+    let filter = FileFilter::from_patterns(true, false, &[])?;
     ZstdFormat::compress(&source_file, &archive_path, &options, &filter, None)?;
 
     // Extract once
@@ -340,7 +341,7 @@ fn test_compress_skips_symlink_by_default() -> Result<()> {
     symlink(source_dir.join("file.txt"), source_dir.join("link.txt"))?;
 
     let options = CompressionOptions::default();
-    let filter = FileFilter::new(true, &[])?;
+    let filter = FileFilter::from_patterns(true, false, &[])?;
     let stats = ZstdFormat::compress(&source_dir, &archive_path, &options, &filter, None)?;
     assert!(stats.output_size > 0);
 
@@ -368,7 +369,7 @@ fn test_compress_rejects_root_symlink_without_follow() -> Result<()> {
     symlink(&target, &link)?;
 
     let options = CompressionOptions::default();
-    let filter = FileFilter::new(true, &[])?;
+    let filter = FileFilter::from_patterns(true, false, &[])?;
     let result = ZstdFormat::compress(&link, &archive_path, &options, &filter, None);
 
     assert!(result.is_err());
@@ -394,10 +395,10 @@ fn test_compress_follow_symlink() -> Result<()> {
     symlink(&target, source_dir.join("link.txt"))?;
 
     let options = CompressionOptions {
-        follow_symlinks: true,
+        symlink_policy: SymlinkPolicy::FollowWithinRoot,
         ..Default::default()
     };
-    let filter = FileFilter::new(true, &[])?;
+    let filter = FileFilter::from_patterns(true, false, &[])?;
     let stats = ZstdFormat::compress(&source_dir, &archive_path, &options, &filter, None)?;
     assert!(stats.output_size > 0);
 
@@ -429,10 +430,10 @@ fn test_compress_follow_symlink_escape_rejected() -> Result<()> {
     symlink(&outside_file, source_dir.join("link.txt"))?;
 
     let options = CompressionOptions {
-        follow_symlinks: true,
+        symlink_policy: SymlinkPolicy::FollowWithinRoot,
         ..Default::default()
     };
-    let filter = FileFilter::new(true, &[])?;
+    let filter = FileFilter::from_patterns(true, false, &[])?;
     let result = ZstdFormat::compress(&source_dir, &archive_path, &options, &filter, None);
 
     assert!(result.is_err());
@@ -460,11 +461,10 @@ fn test_compress_follow_symlink_escape_allowed() -> Result<()> {
     symlink(&outside_file, source_dir.join("link.txt"))?;
 
     let options = CompressionOptions {
-        follow_symlinks: true,
-        allow_symlink_escape: true,
+        symlink_policy: SymlinkPolicy::FollowAllowEscape,
         ..Default::default()
     };
-    let filter = FileFilter::new(true, &[])?;
+    let filter = FileFilter::from_patterns(true, false, &[])?;
     ZstdFormat::compress(&source_dir, &archive_path, &options, &filter, None)?;
 
     fs::create_dir(&extract_dir)?;
@@ -490,7 +490,7 @@ fn test_empty_directory_handling() -> Result<()> {
 
     // Compress empty directory
     let options = CompressionOptions::default();
-    let filter = FileFilter::new(true, &[])?;
+    let filter = FileFilter::from_patterns(true, false, &[])?;
     let stats = ZstdFormat::compress(&empty_dir, &archive_path, &options, &filter, None)?;
 
     // Should succeed and create archive
@@ -522,7 +522,7 @@ fn test_very_long_filename() -> Result<()> {
 
     // Should handle long filenames gracefully
     let options = CompressionOptions::default();
-    let filter = FileFilter::new(true, &[])?;
+    let filter = FileFilter::from_patterns(true, false, &[])?;
     let result = ZstdFormat::compress(&long_file, &archive_path, &options, &filter, None);
 
     // Should either succeed or fail gracefully
@@ -556,7 +556,7 @@ fn test_invalid_glob_pattern_in_filter() {
     ];
 
     for pattern in invalid_patterns {
-        let result = FileFilter::new(true, std::slice::from_ref(&pattern));
+        let result = FileFilter::from_patterns(true, false, std::slice::from_ref(&pattern));
         // Some patterns may be accepted by the glob crate, so we just ensure
         // the function doesn't panic and handles them gracefully
         match result {
@@ -578,7 +578,7 @@ fn test_zero_byte_file() -> Result<()> {
 
     // Compress
     let options = CompressionOptions::default();
-    let filter = FileFilter::new(true, &[])?;
+    let filter = FileFilter::from_patterns(true, false, &[])?;
     let stats = ZstdFormat::compress(&empty_file, &archive_path, &options, &filter, None)?;
 
     assert!(archive_path.exists());

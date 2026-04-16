@@ -22,7 +22,6 @@ const PAX_XATTR_PREFIX: &str = "SCHILY.xattr.";
 
 #[derive(Debug, Clone, Copy)]
 pub struct BuildOptions {
-    pub normalize_ownership: bool,
     pub apply_filter_to_single_file: bool,
     pub directory_slash: bool,
     pub set_mtime_for_single_file: bool,
@@ -37,7 +36,7 @@ fn append_xattrs<W: Write>(builder: &mut Builder<W>, path: &Path) -> Result<()> 
     for name in xattrs {
         let name_str = name.to_str().ok_or_else(|| {
             anyhow::anyhow!(
-                "Non-UTF-8 xattr name on {} (set --keep-xattrs to false to skip)",
+                "Non-UTF-8 xattr name on {} (omit --preserve-xattrs to skip)",
                 path.display()
             )
         })?;
@@ -73,20 +72,20 @@ fn append_xattrs<W: Write>(_builder: &mut Builder<W>, _path: &Path) -> Result<()
 fn apply_header_normalization(
     header: &mut tar::Header,
     metadata: &std::fs::Metadata,
-    normalize_ownership: bool,
+    preserve_ownership: bool,
     set_mtime: bool,
 ) -> Result<()> {
-    if normalize_ownership {
-        header.set_uid(0);
-        header.set_gid(0);
-        header.set_username("")?;
-        header.set_groupname("")?;
-    } else {
+    if preserve_ownership {
         #[cfg(unix)]
         {
             header.set_uid(metadata.uid() as u64);
             header.set_gid(metadata.gid() as u64);
         }
+    } else {
+        header.set_uid(0);
+        header.set_gid(0);
+        header.set_username("")?;
+        header.set_groupname("")?;
     }
 
     if set_mtime {
@@ -103,14 +102,11 @@ fn apply_header_normalization(
 fn create_file_header(
     metadata: &std::fs::Metadata,
     options: &CompressionOptions,
-    normalize_ownership: bool,
     set_mtime: bool,
 ) -> Result<tar::Header> {
     let mut header = tar::Header::new_gnu();
     header.set_size(metadata.len());
-    header.set_mode(if options.normalize_permissions {
-        NORMALIZED_FILE_MODE
-    } else {
+    header.set_mode(if options.preserve_permissions {
         #[cfg(unix)]
         {
             metadata.permissions().mode()
@@ -119,9 +115,11 @@ fn create_file_header(
         {
             NORMALIZED_FILE_MODE
         }
+    } else {
+        NORMALIZED_FILE_MODE
     });
 
-    apply_header_normalization(&mut header, metadata, normalize_ownership, set_mtime)?;
+    apply_header_normalization(&mut header, metadata, options.preserve_ownership, set_mtime)?;
     header.set_cksum();
     Ok(header)
 }
@@ -129,15 +127,12 @@ fn create_file_header(
 fn create_dir_header(
     metadata: &std::fs::Metadata,
     options: &CompressionOptions,
-    normalize_ownership: bool,
     set_mtime: bool,
 ) -> Result<tar::Header> {
     let mut header = tar::Header::new_gnu();
     header.set_entry_type(EntryType::Directory);
     header.set_size(0);
-    header.set_mode(if options.normalize_permissions {
-        NORMALIZED_DIR_MODE
-    } else {
+    header.set_mode(if options.preserve_permissions {
         #[cfg(unix)]
         {
             metadata.permissions().mode()
@@ -146,9 +141,11 @@ fn create_dir_header(
         {
             NORMALIZED_DIR_MODE
         }
+    } else {
+        NORMALIZED_DIR_MODE
     });
 
-    apply_header_normalization(&mut header, metadata, normalize_ownership, set_mtime)?;
+    apply_header_normalization(&mut header, metadata, options.preserve_ownership, set_mtime)?;
     header.set_cksum();
     Ok(header)
 }
@@ -166,19 +163,14 @@ pub fn build_tarball<W: Write>(
 
     let mut bytes_processed = 0u64;
 
-    let archive_walk = utils::walk_archive_input(
-        input_path,
-        filter,
-        options.follow_symlinks,
-        options.allow_symlink_escape,
-    )?;
+    let archive_walk = utils::walk_archive_input(input_path, filter, options.symlink_policy)?;
 
     if input_path.is_file() {
         if build_options.apply_filter_to_single_file && archive_walk.entries.is_empty() {
             return Ok(tar_builder.into_inner()?);
         }
 
-        if !options.strip_xattrs {
+        if options.preserve_xattrs {
             append_xattrs(&mut tar_builder, input_path)?;
         }
 
@@ -193,8 +185,7 @@ pub fn build_tarball<W: Write>(
         let mut header = create_file_header(
             &metadata,
             options,
-            build_options.normalize_ownership,
-            !options.strip_timestamps && build_options.set_mtime_for_single_file,
+            options.preserve_timestamps && build_options.set_mtime_for_single_file,
         )?;
 
         let filename = input_path
@@ -235,19 +226,14 @@ pub fn build_tarball<W: Write>(
 
         if path.is_file() {
             let archive_path_str = utils::normalize_archive_path(&archive_path);
-            if !options.strip_xattrs {
+            if options.preserve_xattrs {
                 append_xattrs(&mut tar_builder, path)?;
             }
 
             let file = File::open(path)
                 .with_context(|| format!("Failed to open file for archiving {}", path.display()))?;
             let metadata = file.metadata()?;
-            let mut header = create_file_header(
-                &metadata,
-                options,
-                build_options.normalize_ownership,
-                !options.strip_timestamps,
-            )?;
+            let mut header = create_file_header(&metadata, options, options.preserve_timestamps)?;
             tar_builder.append_data(&mut header, archive_path_str.as_str(), file)?;
 
             bytes_processed += metadata.len();
@@ -260,17 +246,12 @@ pub fn build_tarball<W: Write>(
             }
 
             let archive_path_str = utils::normalize_archive_path(&archive_path);
-            if !options.strip_xattrs {
+            if options.preserve_xattrs {
                 append_xattrs(&mut tar_builder, path)?;
             }
 
             let metadata = path.metadata()?;
-            let mut header = create_dir_header(
-                &metadata,
-                options,
-                build_options.normalize_ownership,
-                !options.strip_timestamps,
-            )?;
+            let mut header = create_dir_header(&metadata, options, options.preserve_timestamps)?;
             if build_options.directory_slash {
                 let mut dir_path = archive_path_str;
                 if !dir_path.ends_with('/') {
@@ -297,8 +278,8 @@ pub fn extract_tarball<R: Read>(
     progress: Option<&Progress>,
 ) -> Result<()> {
     let mut archive = Archive::new(reader);
-    archive.set_preserve_mtime(!options.strip_timestamps);
-    archive.set_unpack_xattrs(!options.strip_xattrs);
+    archive.set_preserve_mtime(options.preserve_timestamps);
+    archive.set_unpack_xattrs(options.preserve_xattrs);
     archive.set_preserve_permissions(options.preserve_permissions);
     archive.set_preserve_ownerships(options.preserve_ownership);
     std::fs::create_dir_all(output_dir)?;

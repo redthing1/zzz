@@ -1,4 +1,4 @@
-//! Metadata-focused tests for redaction and defaults.
+//! Metadata-focused tests for defaults and preservation policies.
 
 use assert_cmd::cargo::cargo_bin_cmd;
 use assert_cmd::Command;
@@ -173,7 +173,7 @@ fn sevenz_entry_mtime_seconds(archive_path: &Path) -> Result<Option<i64>> {
 }
 
 #[test]
-fn test_redact_strips_timestamps_tar_zstd() -> Result<()> {
+fn test_default_preserves_timestamps_tar_zstd() -> Result<()> {
     let temp_dir = TempDir::new()?;
     let source_file = temp_dir.path().join("note.txt");
     fs::write(&source_file, "metadata test")?;
@@ -185,18 +185,8 @@ fn test_redact_strips_timestamps_tar_zstd() -> Result<()> {
         .arg(&source_file)
         .assert()
         .success();
-    let (default_mtime, _) = read_zstd_tar_metadata(&default_archive)?;
-    assert!(default_mtime > 0);
-
-    let redacted_archive = temp_dir.path().join("redacted.zst");
-    zzz_cmd()
-        .args(["compress", "--redact", "-f", "zst", "-o"])
-        .arg(&redacted_archive)
-        .arg(&source_file)
-        .assert()
-        .success();
-    let (redacted_mtime, _) = read_zstd_tar_metadata(&redacted_archive)?;
-    assert_eq!(redacted_mtime, 0);
+    let (mtime, _) = read_zstd_tar_metadata(&default_archive)?;
+    assert!(mtime > 0);
 
     Ok(())
 }
@@ -259,7 +249,7 @@ fn test_extract_strips_xattrs_by_default_tar_zstd() -> Result<()> {
 
     let archive_path = temp_dir.path().join("xattr.zst");
     zzz_cmd()
-        .args(["compress", "--keep-xattrs", "-f", "zst", "-o"])
+        .args(["compress", "--preserve-xattrs", "-f", "zst", "-o"])
         .arg(&archive_path)
         .arg(&source_file)
         .assert()
@@ -282,7 +272,7 @@ fn test_extract_strips_xattrs_by_default_tar_zstd() -> Result<()> {
 
 #[cfg(unix)]
 #[test]
-fn test_extract_keep_xattrs_tar_zstd() -> Result<()> {
+fn test_extract_preserves_xattrs_tar_zstd() -> Result<()> {
     let temp_dir = TempDir::new()?;
     let source_file = temp_dir.path().join("xattr.txt");
     fs::write(&source_file, "xattr test")?;
@@ -293,7 +283,7 @@ fn test_extract_keep_xattrs_tar_zstd() -> Result<()> {
 
     let archive_path = temp_dir.path().join("xattr.zst");
     zzz_cmd()
-        .args(["compress", "--keep-xattrs", "-f", "zst", "-o"])
+        .args(["compress", "--preserve-xattrs", "-f", "zst", "-o"])
         .arg(&archive_path)
         .arg(&source_file)
         .assert()
@@ -301,7 +291,7 @@ fn test_extract_keep_xattrs_tar_zstd() -> Result<()> {
 
     let extract_dir = temp_dir.path().join("extract_keep");
     zzz_cmd()
-        .args(["extract", "--keep-xattrs", "-C"])
+        .args(["extract", "--preserve-xattrs", "-C"])
         .arg(&extract_dir)
         .arg(&archive_path)
         .assert()
@@ -339,7 +329,7 @@ fn test_default_strips_ownership_in_tar_zstd() -> Result<()> {
 
 #[cfg(unix)]
 #[test]
-fn test_keep_ownership_tar_zstd() -> Result<()> {
+fn test_preserve_ownership_tar_zstd() -> Result<()> {
     use std::os::unix::fs::MetadataExt;
 
     let temp_dir = TempDir::new()?;
@@ -352,7 +342,7 @@ fn test_keep_ownership_tar_zstd() -> Result<()> {
 
     let archive_path = temp_dir.path().join("owner_keep.zst");
     zzz_cmd()
-        .args(["compress", "--keep-ownership", "-f", "zst", "-o"])
+        .args(["compress", "--preserve-ownership", "-f", "zst", "-o"])
         .arg(&archive_path)
         .arg(&source_file)
         .assert()
@@ -367,7 +357,7 @@ fn test_keep_ownership_tar_zstd() -> Result<()> {
 
 #[cfg(unix)]
 #[test]
-fn test_keep_permissions_tar_zstd() -> Result<()> {
+fn test_default_preserves_permissions_tar_zstd() -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
 
     let temp_dir = TempDir::new()?;
@@ -377,7 +367,7 @@ fn test_keep_permissions_tar_zstd() -> Result<()> {
 
     let archive_path = temp_dir.path().join("mode_keep.zst");
     zzz_cmd()
-        .args(["compress", "--keep-permissions", "-f", "zst", "-o"])
+        .args(["compress", "-f", "zst", "-o"])
         .arg(&archive_path)
         .arg(&source_file)
         .assert()
@@ -391,7 +381,7 @@ fn test_keep_permissions_tar_zstd() -> Result<()> {
 
 #[cfg(unix)]
 #[test]
-fn test_keep_permissions_zip() -> Result<()> {
+fn test_default_preserves_permissions_zip() -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
 
     let temp_dir = TempDir::new()?;
@@ -401,7 +391,7 @@ fn test_keep_permissions_zip() -> Result<()> {
 
     let archive_path = temp_dir.path().join("mode_keep.zip");
     zzz_cmd()
-        .args(["compress", "--keep-permissions", "-f", "zip", "-o"])
+        .args(["compress", "-f", "zip", "-o"])
         .arg(&archive_path)
         .arg(&source_file)
         .assert()
@@ -411,57 +401,6 @@ fn test_keep_permissions_zip() -> Result<()> {
         anyhow::anyhow!("zip entry missing unix mode for {}", archive_path.display())
     })?;
     assert_eq!(mode & 0o777, 0o700);
-
-    Ok(())
-}
-
-#[cfg(unix)]
-#[test]
-fn test_redact_overrides_keep_xattrs_tar_zstd() -> Result<()> {
-    let temp_dir = TempDir::new()?;
-    let source_file = temp_dir.path().join("xattr.txt");
-    fs::write(&source_file, "xattr test")?;
-
-    if xattr::set(&source_file, "user.zzz_test", b"secret").is_err() {
-        return Ok(());
-    }
-
-    let archive_path = temp_dir.path().join("redacted_xattr.zst");
-    zzz_cmd()
-        .args(["compress", "--keep-xattrs", "--redact", "-f", "zst", "-o"])
-        .arg(&archive_path)
-        .arg(&source_file)
-        .assert()
-        .success();
-
-    let info = read_zstd_tar_header_info(&archive_path)?;
-    assert!(!info.has_xattr);
-
-    Ok(())
-}
-
-#[test]
-fn test_redact_strips_timestamps_zip() -> Result<()> {
-    use std::fs::File;
-    use zip::ZipArchive;
-
-    let temp_dir = TempDir::new()?;
-    let source_file = temp_dir.path().join("zip.txt");
-    fs::write(&source_file, "zip metadata test")?;
-
-    let archive_path = temp_dir.path().join("redacted.zip");
-    zzz_cmd()
-        .args(["compress", "--redact", "-f", "zip", "-o"])
-        .arg(&archive_path)
-        .arg(&source_file)
-        .assert()
-        .success();
-
-    let file = File::open(&archive_path)?;
-    let mut archive = ZipArchive::new(file)?;
-    let entry = archive.by_index(0)?;
-    let timestamp = entry.last_modified().expect("zip entry missing timestamp");
-    assert_eq!(timestamp.year(), 1980);
 
     Ok(())
 }
@@ -524,37 +463,6 @@ fn test_strip_timestamps_flag_zip() -> Result<()> {
     let entry = archive.by_index(0)?;
     let timestamp = entry.last_modified().expect("zip entry missing timestamp");
     assert_eq!(timestamp.year(), 1980);
-
-    Ok(())
-}
-
-#[test]
-fn test_redact_strips_timestamps_sevenz() -> Result<()> {
-    use sevenz_rust::{Password, SevenZReader};
-
-    let temp_dir = TempDir::new()?;
-    let source_file = temp_dir.path().join("seven.txt");
-    fs::write(&source_file, "7z metadata test")?;
-
-    let archive_path = temp_dir.path().join("redacted.7z");
-    zzz_cmd()
-        .args(["compress", "--redact", "-f", "7z", "-o"])
-        .arg(&archive_path)
-        .arg(&source_file)
-        .assert()
-        .success();
-
-    let reader = SevenZReader::open(&archive_path, Password::empty())?;
-    let entry = reader
-        .archive()
-        .files
-        .iter()
-        .find(|entry| entry.has_stream)
-        .ok_or_else(|| anyhow::anyhow!("missing 7z file entry"))?;
-
-    assert!(!entry.has_creation_date);
-    assert!(!entry.has_last_modified_date);
-    assert!(!entry.has_access_date);
 
     Ok(())
 }
@@ -749,7 +657,7 @@ fn test_extract_preserves_permissions_tar_zstd() -> Result<()> {
 
     let archive_path = temp_dir.path().join("mode_keep.zst");
     zzz_cmd()
-        .args(["compress", "--keep-permissions", "-f", "zst", "-o"])
+        .args(["compress", "-f", "zst", "-o"])
         .arg(&archive_path)
         .arg(&source_file)
         .assert()
@@ -757,7 +665,7 @@ fn test_extract_preserves_permissions_tar_zstd() -> Result<()> {
 
     let extract_dir = temp_dir.path().join("extract_mode");
     zzz_cmd()
-        .args(["extract", "--keep-permissions", "-C"])
+        .args(["extract", "-C"])
         .arg(&extract_dir)
         .arg(&archive_path)
         .assert()
@@ -782,7 +690,7 @@ fn test_extract_preserves_permissions_zip() -> Result<()> {
 
     let archive_path = temp_dir.path().join("mode_keep.zip");
     zzz_cmd()
-        .args(["compress", "--keep-permissions", "-f", "zip", "-o"])
+        .args(["compress", "-f", "zip", "-o"])
         .arg(&archive_path)
         .arg(&source_file)
         .assert()
@@ -790,7 +698,7 @@ fn test_extract_preserves_permissions_zip() -> Result<()> {
 
     let extract_dir = temp_dir.path().join("extract_mode_zip");
     zzz_cmd()
-        .args(["extract", "--keep-permissions", "-C"])
+        .args(["extract", "-C"])
         .arg(&extract_dir)
         .arg(&archive_path)
         .assert()

@@ -25,7 +25,7 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    /// compress files/directories (supports .zst, .tgz, .txz, .zip, .7z)
+    /// compress files/directories (defaults: preserve perms+timestamps, strip owner+xattrs, skip symlinks)
     #[command(alias = "c")]
     Compress {
         /// compression level (1-22)
@@ -46,15 +46,11 @@ pub enum Commands {
 
         /// preserve extended attributes (xattrs) in tar-based archives
         #[arg(long)]
-        keep_xattrs: bool,
-
-        /// preserve original file permissions in archive entries
-        #[arg(long)]
-        keep_permissions: bool,
+        preserve_xattrs: bool,
 
         /// preserve ownership (uid/gid) in tar-based archives
         #[arg(long)]
-        keep_ownership: bool,
+        preserve_ownership: bool,
 
         /// follow symlink targets (default: skip symlinks)
         #[arg(long)]
@@ -64,10 +60,6 @@ pub enum Commands {
         #[arg(long)]
         allow_symlink_escape: bool,
 
-        /// strip timestamps and xattrs, normalize ownership/permissions, and exclude common secrets (overrides keep flags)
-        #[arg(long)]
-        redact: bool,
-
         /// strip filesystem timestamps in archive entries
         #[arg(long)]
         strip_timestamps: bool,
@@ -75,6 +67,10 @@ pub enum Commands {
         /// disable built-in garbage file filtering
         #[arg(short = 'E', long)]
         no_default_excludes: bool,
+
+        /// exclude common sensitive files such as .env, .ssh, and key material
+        #[arg(long)]
+        exclude_sensitive: bool,
 
         /// force specific format (zst, tgz, txz, zip, 7z)
         #[arg(short = 'f', long, value_parser = parse_format)]
@@ -92,7 +88,7 @@ pub enum Commands {
         password: Option<String>,
     },
 
-    /// extract archives (auto-detects format: .zst, .tgz, .txz, .zip, .7z)
+    /// extract archives (defaults: preserve perms+timestamps, ignore owner+xattrs)
     #[command(alias = "x")]
     Extract {
         /// archive file to extract
@@ -115,19 +111,15 @@ pub enum Commands {
 
         /// preserve extended attributes (xattrs) when extracting tar-based archives
         #[arg(long)]
-        keep_xattrs: bool,
+        preserve_xattrs: bool,
 
         /// strip filesystem timestamps when extracting tar-based archives
         #[arg(long)]
         strip_timestamps: bool,
 
-        /// preserve file permissions when extracting
-        #[arg(long)]
-        keep_permissions: bool,
-
         /// preserve ownership (uid/gid) when extracting tar-based archives
         #[arg(long)]
-        keep_ownership: bool,
+        preserve_ownership: bool,
 
         /// overwrite existing files
         #[arg(short = 'y', long)]
