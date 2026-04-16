@@ -207,6 +207,50 @@ fn test_compress_output_inside_input_rejected() -> Result<()> {
 
 #[cfg(unix)]
 #[test]
+fn test_compress_skips_symlinks_by_default_cli() -> Result<()> {
+    use std::os::unix::fs::symlink;
+
+    let temp_dir = TempDir::new()?;
+    let source_dir = temp_dir.path().join("source");
+    let output_file = temp_dir.path().join("archive.zst");
+    let extract_dir = temp_dir.path().join("extract");
+
+    fs::create_dir(&source_dir)?;
+    let target = source_dir.join("target.txt");
+    fs::write(&target, "symlink content")?;
+    symlink(&target, source_dir.join("link.txt"))?;
+
+    zzz_cmd()
+        .args(["compress", "-o"])
+        .arg(&output_file)
+        .arg(&source_dir)
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("warning: skipped 1 symlink"));
+
+    zzz_cmd()
+        .args(["list"])
+        .arg(&output_file)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("target.txt"))
+        .stdout(predicate::str::contains("link.txt").not());
+
+    zzz_cmd()
+        .args(["extract", "-C"])
+        .arg(&extract_dir)
+        .arg(&output_file)
+        .assert()
+        .success();
+
+    assert!(extract_dir.join("source/target.txt").exists());
+    assert!(!extract_dir.join("source/link.txt").exists());
+
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
 fn test_compress_follow_symlinks_cli() -> Result<()> {
     use std::os::unix::fs::symlink;
 

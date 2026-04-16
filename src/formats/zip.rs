@@ -125,45 +125,27 @@ impl CompressionFormat for ZipFormat {
             }
 
             let base_path = input_path.parent().unwrap_or(input_path);
-            let canonical_root = if options.follow_symlinks && !options.allow_symlink_escape {
-                Some(std::fs::canonicalize(input_path).with_context(|| {
-                    format!("Failed to resolve input root '{}'", input_path.display())
-                })?)
-            } else {
-                None
-            };
-            let mut entries: Vec<_> = filter
-                .walk_entries_with_follow(input_path, options.follow_symlinks)
-                .map(|entry| {
-                    let entry = entry?;
-                    if entry.path_is_symlink() {
-                        if !options.follow_symlinks {
-                            return Err(anyhow::anyhow!(
-                                "symlink '{}' is not supported for archiving (use --follow-symlinks to include targets)",
-                                entry.path().display()
-                            ));
-                        }
-                        if let Some(root) = &canonical_root {
-                            utils::ensure_symlink_within_root(root, entry.path())?;
-                        }
-                    }
-                    Ok(entry)
-                })
-                .collect::<std::result::Result<Vec<_>, _>>()?;
+            let mut entries = utils::walk_archive_input(
+                input_path,
+                filter,
+                options.follow_symlinks,
+                options.allow_symlink_escape,
+            )?
+            .entries;
 
             // Sort for deterministic archives
             if options.deterministic {
-                entries.sort_by(|a, b| a.path().cmp(b.path()));
+                entries.sort();
             }
 
             let mut processed_size = 0u64;
 
             for entry in entries {
-                let path = entry.path();
+                let path = entry.as_path();
                 let relative_path = path.strip_prefix(base_path)?;
                 let path_str = utils::normalize_archive_path(relative_path);
 
-                let metadata = entry.metadata()?;
+                let metadata = path.metadata()?;
                 let zip_time = zip_last_modified(&metadata, options.strip_timestamps);
                 let permissions = if options.normalize_permissions {
                     0o644

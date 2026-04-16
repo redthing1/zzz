@@ -56,7 +56,7 @@ pub enum Commands {
         #[arg(long)]
         keep_ownership: bool,
 
-        /// follow symlinks and archive target contents (may include files outside input)
+        /// follow symlink targets (default: skip symlinks)
         #[arg(long)]
         follow_symlinks: bool,
 

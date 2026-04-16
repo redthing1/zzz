@@ -1,10 +1,29 @@
-//! utility functions for file size calculations and formatting
+//! utility functions for file size calculations, archive traversal, and formatting
 
 use crate::Result;
 use anyhow::Context;
 use filetime::FileTime;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SymlinkHandling {
+    Skip,
+    Follow,
+}
+
+#[derive(Debug, Clone)]
+pub struct ArchiveInputSummary {
+    pub total_size: u64,
+    pub skipped_symlinks: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct ArchiveWalk {
+    pub entries: Vec<PathBuf>,
+    pub total_size: u64,
+    pub skipped_symlinks: usize,
+}
 
 /// sanitize an archive entry path and apply strip_components
 pub fn sanitize_archive_entry_path(
@@ -213,6 +232,129 @@ pub fn calculate_dir_size(path: &Path) -> Result<u64> {
     Ok(total)
 }
 
+fn symlink_handling(follow_symlinks: bool) -> SymlinkHandling {
+    if follow_symlinks {
+        SymlinkHandling::Follow
+    } else {
+        SymlinkHandling::Skip
+    }
+}
+
+fn archive_root_guard(
+    path: &Path,
+    handling: SymlinkHandling,
+    allow_symlink_escape: bool,
+) -> Result<Option<PathBuf>> {
+    if handling == SymlinkHandling::Follow && !allow_symlink_escape {
+        return Ok(Some(std::fs::canonicalize(path).with_context(|| {
+            format!("Failed to resolve input root '{}'", path.display())
+        })?));
+    }
+
+    Ok(None)
+}
+
+fn validate_root_symlink(
+    path: &Path,
+    handling: SymlinkHandling,
+    canonical_root: Option<&PathBuf>,
+) -> Result<()> {
+    let metadata = std::fs::symlink_metadata(path)?;
+    if !metadata.file_type().is_symlink() {
+        return Ok(());
+    }
+
+    match handling {
+        SymlinkHandling::Skip => Err(anyhow::anyhow!(
+            "input path '{}' is a symlink; use --follow-symlinks",
+            path.display()
+        )),
+        SymlinkHandling::Follow => {
+            if let Some(root) = canonical_root {
+                ensure_symlink_within_root(root, path)?;
+            }
+            Ok(())
+        }
+    }
+}
+
+/// walk archive input using the shared symlink policy
+pub fn walk_archive_input(
+    path: &Path,
+    filter: &crate::filter::FileFilter,
+    follow_symlinks: bool,
+    allow_symlink_escape: bool,
+) -> Result<ArchiveWalk> {
+    let handling = symlink_handling(follow_symlinks);
+    let canonical_root = archive_root_guard(path, handling, allow_symlink_escape)?;
+    validate_root_symlink(path, handling, canonical_root.as_ref())?;
+
+    let mut entries = Vec::new();
+    let mut total = 0;
+    let mut skipped_symlinks = 0;
+
+    if path.is_file() {
+        if let Some(filename) = path.file_name() {
+            if !filter.should_include_relative(Path::new(filename)) {
+                return Ok(ArchiveWalk {
+                    entries,
+                    total_size: 0,
+                    skipped_symlinks,
+                });
+            }
+        }
+        total = path.metadata()?.len();
+        entries.push(path.to_path_buf());
+        return Ok(ArchiveWalk {
+            entries,
+            total_size: total,
+            skipped_symlinks,
+        });
+    }
+
+    for entry in filter.walk_entries_with_follow(path, follow_symlinks) {
+        let entry = entry?;
+        if entry.path_is_symlink() {
+            match handling {
+                SymlinkHandling::Skip => {
+                    skipped_symlinks += 1;
+                    continue;
+                }
+                SymlinkHandling::Follow => {
+                    if let Some(root) = &canonical_root {
+                        ensure_symlink_within_root(root, entry.path())?;
+                    }
+                }
+            }
+        }
+
+        if entry.file_type().is_file() {
+            total += entry.metadata()?.len();
+        }
+        entries.push(entry.into_path());
+    }
+
+    Ok(ArchiveWalk {
+        entries,
+        total_size: total,
+        skipped_symlinks,
+    })
+}
+
+/// summarize archive input for progress reporting and warnings
+pub fn summarize_archive_input(
+    path: &Path,
+    filter: &crate::filter::FileFilter,
+    follow_symlinks: bool,
+    allow_symlink_escape: bool,
+) -> Result<ArchiveInputSummary> {
+    let walk = walk_archive_input(path, filter, follow_symlinks, allow_symlink_escape)?;
+    Ok(ArchiveInputSummary {
+        total_size: walk.total_size,
+        skipped_symlinks: walk.skipped_symlinks,
+    })
+}
+
 /// calculate total size of a directory with file filtering
 pub fn calculate_directory_size(
     path: &Path,
@@ -220,57 +362,7 @@ pub fn calculate_directory_size(
     follow_symlinks: bool,
     allow_symlink_escape: bool,
 ) -> Result<u64> {
-    let mut total = 0;
-    let canonical_root = if follow_symlinks && !allow_symlink_escape {
-        Some(
-            std::fs::canonicalize(path)
-                .with_context(|| format!("Failed to resolve input root '{}'", path.display()))?,
-        )
-    } else {
-        None
-    };
-
-    let metadata = std::fs::symlink_metadata(path)?;
-    if metadata.file_type().is_symlink() {
-        if !follow_symlinks {
-            return Err(anyhow::anyhow!(
-                "symlink '{}' is not supported for archiving (use --follow-symlinks to include targets)",
-                path.display()
-            ));
-        }
-        if let Some(root) = &canonical_root {
-            ensure_symlink_within_root(root, path)?;
-        }
-    }
-
-    if path.is_file() {
-        if let Some(filename) = path.file_name() {
-            if !filter.should_include_relative(Path::new(filename)) {
-                return Ok(0);
-            }
-        }
-        return Ok(path.metadata()?.len());
-    }
-
-    for entry in filter.walk_entries_with_follow(path, follow_symlinks) {
-        let entry = entry?;
-        if entry.path_is_symlink() {
-            if !follow_symlinks {
-                return Err(anyhow::anyhow!(
-                    "symlink '{}' is not supported for archiving (use --follow-symlinks to include targets)",
-                    entry.path().display()
-                ));
-            }
-            if let Some(root) = &canonical_root {
-                ensure_symlink_within_root(root, entry.path())?;
-            }
-        }
-        if entry.file_type().is_file() {
-            total += entry.metadata()?.len();
-        }
-    }
-
-    Ok(total)
+    Ok(summarize_archive_input(path, filter, follow_symlinks, allow_symlink_escape)?.total_size)
 }
 
 /// format bytes in human-readable format

@@ -327,12 +327,13 @@ fn test_extract_rejects_symlink_ancestor() -> Result<()> {
 
 #[cfg(unix)]
 #[test]
-fn test_compress_rejects_symlink() -> Result<()> {
+fn test_compress_skips_symlink_by_default() -> Result<()> {
     use std::os::unix::fs::symlink;
 
     let temp_dir = TempDir::new()?;
     let source_dir = temp_dir.path().join("source");
     let archive_path = temp_dir.path().join("archive.zst");
+    let extract_dir = temp_dir.path().join("extract");
 
     fs::create_dir(&source_dir)?;
     fs::write(source_dir.join("file.txt"), "content")?;
@@ -340,11 +341,39 @@ fn test_compress_rejects_symlink() -> Result<()> {
 
     let options = CompressionOptions::default();
     let filter = FileFilter::new(true, &[])?;
-    let result = ZstdFormat::compress(&source_dir, &archive_path, &options, &filter, None);
+    let stats = ZstdFormat::compress(&source_dir, &archive_path, &options, &filter, None)?;
+    assert!(stats.output_size > 0);
+
+    fs::create_dir(&extract_dir)?;
+    let extract_options = ExtractionOptions::default();
+    ZstdFormat::extract(&archive_path, &extract_dir, &extract_options, None)?;
+
+    assert!(extract_dir.join("source/file.txt").exists());
+    assert!(!extract_dir.join("source/link.txt").exists());
+
+    Ok(())
+}
+
+#[cfg(unix)]
+#[test]
+fn test_compress_rejects_root_symlink_without_follow() -> Result<()> {
+    use std::os::unix::fs::symlink;
+
+    let temp_dir = TempDir::new()?;
+    let target = temp_dir.path().join("target.txt");
+    let link = temp_dir.path().join("link.txt");
+    let archive_path = temp_dir.path().join("archive.zst");
+
+    fs::write(&target, "content")?;
+    symlink(&target, &link)?;
+
+    let options = CompressionOptions::default();
+    let filter = FileFilter::new(true, &[])?;
+    let result = ZstdFormat::compress(&link, &archive_path, &options, &filter, None);
 
     assert!(result.is_err());
     let error_msg = result.unwrap_err().to_string();
-    assert!(error_msg.contains("symlink"));
+    assert!(error_msg.contains("use --follow-symlinks"));
 
     Ok(())
 }

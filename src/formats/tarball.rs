@@ -166,34 +166,16 @@ pub fn build_tarball<W: Write>(
 
     let mut bytes_processed = 0u64;
 
-    let canonical_root =
-        if options.follow_symlinks && !options.allow_symlink_escape {
-            Some(std::fs::canonicalize(input_path).with_context(|| {
-                format!("Failed to resolve input root '{}'", input_path.display())
-            })?)
-        } else {
-            None
-        };
+    let archive_walk = utils::walk_archive_input(
+        input_path,
+        filter,
+        options.follow_symlinks,
+        options.allow_symlink_escape,
+    )?;
 
     if input_path.is_file() {
-        let metadata = std::fs::symlink_metadata(input_path)?;
-        if metadata.file_type().is_symlink() {
-            if !options.follow_symlinks {
-                return Err(anyhow::anyhow!(
-                    "symlink '{}' is not supported for archiving (use --follow-symlinks to include targets)",
-                    input_path.display()
-                ));
-            }
-            if let Some(root) = &canonical_root {
-                utils::ensure_symlink_within_root(root, input_path)?;
-            }
-        }
-        if build_options.apply_filter_to_single_file {
-            if let Some(filename) = input_path.file_name() {
-                if !filter.should_include_relative(Path::new(filename)) {
-                    return Ok(tar_builder.into_inner()?);
-                }
-            }
+        if build_options.apply_filter_to_single_file && archive_walk.entries.is_empty() {
+            return Ok(tar_builder.into_inner()?);
         }
 
         if !options.strip_xattrs {
@@ -235,31 +217,13 @@ pub fn build_tarball<W: Write>(
     }
 
     let root_name = input_path.file_name();
-    let mut entries: Vec<_> = filter
-        .walk_entries_with_follow(input_path, options.follow_symlinks)
-        .map(|entry| {
-            let entry = entry?;
-            if entry.path_is_symlink() {
-                if !options.follow_symlinks {
-                    return Err(anyhow::anyhow!(
-                        "symlink '{}' is not supported for archiving (use --follow-symlinks to include targets)",
-                        entry.path().display()
-                    ));
-                }
-                if let Some(root) = &canonical_root {
-                    utils::ensure_symlink_within_root(root, entry.path())?;
-                }
-            }
-            Ok(entry)
-        })
-        .collect::<std::result::Result<Vec<_>, _>>()?;
-
+    let mut entries = archive_walk.entries;
     if options.deterministic {
-        entries.sort_by(|a, b| a.path().cmp(b.path()));
+        entries.sort();
     }
 
     for entry in entries {
-        let path = entry.path();
+        let path = entry.as_path();
         let relative = path.strip_prefix(input_path).unwrap_or(path);
         let mut archive_path = PathBuf::new();
         if let Some(root) = root_name {
@@ -277,7 +241,7 @@ pub fn build_tarball<W: Write>(
 
             let file = File::open(path)
                 .with_context(|| format!("Failed to open file for archiving {}", path.display()))?;
-            let metadata = entry.metadata()?;
+            let metadata = file.metadata()?;
             let mut header = create_file_header(
                 &metadata,
                 options,
@@ -300,7 +264,7 @@ pub fn build_tarball<W: Write>(
                 append_xattrs(&mut tar_builder, path)?;
             }
 
-            let metadata = entry.metadata()?;
+            let metadata = path.metadata()?;
             let mut header = create_dir_header(
                 &metadata,
                 options,
