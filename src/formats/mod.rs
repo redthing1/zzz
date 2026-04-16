@@ -191,23 +191,7 @@ impl Format {
             return Ok(Format::Rar); // RAR v5
         }
 
-        // Use tree_magic_mini as final fallback
-        match tree_magic_mini::from_filepath(path) {
-            Some(mime_type) => match mime_type {
-                "application/zstd" => Ok(Format::Zstd),
-                "application/gzip" | "application/x-gzip" => Ok(Format::Gzip),
-                "application/x-xz" => Ok(Format::Xz),
-                "application/zip" => Ok(Format::Zip),
-                "application/x-7z-compressed" => Ok(Format::SevenZ),
-                "application/x-rar-compressed" | "application/vnd.rar" => Ok(Format::Rar),
-                _ => Err(anyhow::anyhow!(
-                    "unsupported archive format (unknown mime type from tree_magic_mini: {mime_type})"
-                )),
-            },
-            None => Err(anyhow::anyhow!(
-                "failed to determine mime type using tree_magic_mini (returned None)"
-            )),
-        }
+        Err(anyhow::anyhow!("unsupported archive format"))
     }
 
     /// Get the default file extension for this format

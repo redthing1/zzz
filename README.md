@@ -18,7 +18,13 @@ cargo build --release
 ## install
 
 ```sh
-cargo install --path .
+cargo install --path . --locked
+```
+
+For a pinned git install:
+
+```sh
+cargo install --git https://github.com/redthing1/zzz --rev <commit> --locked
 ```
 
 ## usage

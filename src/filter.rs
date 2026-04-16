@@ -3,8 +3,7 @@
 use crate::policy::FilterPolicy;
 use crate::Result;
 use glob::Pattern;
-use once_cell::sync::Lazy;
-use std::path::Path;
+use std::{path::Path, sync::LazyLock};
 use walkdir::WalkDir;
 
 /// comprehensive list of garbage files to exclude by default
@@ -126,14 +125,14 @@ pub const SENSITIVE_FILES: &[&str] = &[
     ".sops.json",
 ];
 
-static COMPILED_GARBAGE_PATTERNS: Lazy<Vec<Pattern>> = Lazy::new(|| {
+static COMPILED_GARBAGE_PATTERNS: LazyLock<Vec<Pattern>> = LazyLock::new(|| {
     GARBAGE_FILES
         .iter()
         .filter_map(|s| Pattern::new(s).ok())
         .collect()
 });
 
-static COMPILED_SENSITIVE_PATTERNS: Lazy<Vec<Pattern>> = Lazy::new(|| {
+static COMPILED_SENSITIVE_PATTERNS: LazyLock<Vec<Pattern>> = LazyLock::new(|| {
     SENSITIVE_FILES
         .iter()
         .filter_map(|s| Pattern::new(s).ok())

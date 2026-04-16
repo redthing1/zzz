@@ -8,12 +8,11 @@
 use crate::Result;
 use anyhow::{anyhow, bail, Context};
 use argon2::Argon2;
-use rand::RngCore;
 use std::io::{self, ErrorKind, Read};
 
 // AES-GCM imports
 use aes_gcm::{
-    aead::{Aead, KeyInit, OsRng as AeadOsRng},
+    aead::{rand_core::RngCore, Aead, KeyInit, OsRng as AeadOsRng},
     Aes256Gcm, Nonce,
 };
 
@@ -58,7 +57,7 @@ pub fn derive_key(password: &str, salt_opt: Option<&[u8]>) -> Result<(Vec<u8>, V
         }
         None => {
             let mut new_salt = vec![0u8; ARGON2_SALT_LEN];
-            rand::rngs::OsRng
+            AeadOsRng
                 .try_fill_bytes(&mut new_salt)
                 .context("Failed to generate random salt for Argon2")?;
             new_salt
@@ -341,7 +340,7 @@ mod tests {
     fn test_derive_key_with_provided_salt() {
         let password = "test_password";
         let mut salt = vec![0u8; ARGON2_SALT_LEN];
-        rand::rngs::OsRng.try_fill_bytes(&mut salt).unwrap();
+        AeadOsRng.try_fill_bytes(&mut salt).unwrap();
 
         let (key1, used_salt1) = derive_key(password, Some(&salt)).unwrap();
         assert_eq!(key1.len(), AES_KEY_SIZE);
