@@ -1,7 +1,7 @@
 //! ZIP format support
 
 use crate::{
-    filter::FileFilter,
+    archive_plan::{ArchivePlan, PlannedEntryKind},
     formats::{
         ArchiveEntry, CompressionFormat, CompressionOptions, CompressionStats, ExtractionOptions,
     },
@@ -35,16 +35,12 @@ fn zip_last_modified(metadata: &std::fs::Metadata, preserve_timestamps: bool) ->
 }
 
 impl CompressionFormat for ZipFormat {
-    fn compress(
-        input_path: &Path,
+    fn compress_plan(
+        plan: &ArchivePlan,
         output_path: &Path,
         options: &CompressionOptions,
-        filter: &FileFilter,
         progress: Option<&Progress>,
     ) -> Result<CompressionStats> {
-        let input_size =
-            utils::calculate_directory_size(input_path, filter, options.symlink_policy)?;
-
         let output_file = File::create(output_path)
             .with_context(|| format!("Failed to create output file {}", output_path.display()))?;
         let buf_writer = BufWriter::new(output_file);
@@ -57,23 +53,22 @@ impl CompressionFormat for ZipFormat {
             .compression_level(Some(zip_level));
 
         if let Some(progress) = progress {
-            progress.set_length(input_size);
+            progress.set_length(plan.total_size);
         }
 
-        if input_path.is_file() {
-            // Single file compression
-            // Password protection is not supported for ZIP format
-            if options.password.is_some() {
-                return Err(anyhow::anyhow!("Password protection is not supported for ZIP format. Use 7z format for password protection."));
-            }
+        // Password protection is not supported for ZIP format
+        if options.password.is_some() {
+            return Err(anyhow::anyhow!("Password protection is not supported for ZIP format. Use 7z format for password protection."));
+        }
 
-            let metadata = std::fs::metadata(input_path).with_context(|| {
-                format!(
-                    "Failed to read metadata for input file {}",
-                    input_path.display()
-                )
+        let mut processed_size = 0u64;
+
+        for entry in &plan.entries {
+            let metadata = std::fs::metadata(&entry.disk_path).with_context(|| {
+                format!("Failed to read metadata for {}", entry.disk_path.display())
             })?;
             let zip_time = zip_last_modified(&metadata, options.preserve_timestamps);
+            let default_mode = if entry.is_dir() { 0o755 } else { 0o644 };
             let permissions = if options.preserve_permissions {
                 #[cfg(unix)]
                 {
@@ -81,84 +76,25 @@ impl CompressionFormat for ZipFormat {
                 }
                 #[cfg(not(unix))]
                 {
-                    0o644
+                    default_mode
                 }
             } else {
-                0o644
+                default_mode
             };
             let current_file_options = base_file_options
                 .last_modified_time(zip_time)
                 .unix_permissions(permissions);
+            let path_str = utils::normalize_archive_path(&entry.archive_path);
 
-            let filename_os = input_path.file_name().ok_or_else(|| {
-                anyhow::anyhow!(
-                    "Could not determine filename from input path: {}",
-                    input_path.display()
-                )
-            })?;
-            if !filter.should_include_relative(Path::new(filename_os)) {
-                zip_writer.finish()?;
-                let output_size = std::fs::metadata(output_path)?.len();
-                return Ok(CompressionStats::new(input_size, output_size));
-            }
-
-            let filename = filename_os.to_str().ok_or_else(|| {
-                anyhow::anyhow!(
-                    "Could not determine filename from input path: {}",
-                    input_path.display()
-                )
-            })?;
-            zip_writer.start_file(filename, current_file_options)?;
-
-            let mut file = File::open(input_path)
-                .with_context(|| format!("Failed to open input file {}", input_path.display()))?;
-            std::io::copy(&mut file, &mut zip_writer)?;
-        } else {
-            // Directory compression
-            // Password protection is not supported for ZIP format
-            if options.password.is_some() {
-                return Err(anyhow::anyhow!("Password protection is not supported for ZIP format. Use 7z format for password protection."));
-            }
-
-            let base_path = input_path.parent().unwrap_or(input_path);
-            let mut entries =
-                utils::walk_archive_input(input_path, filter, options.symlink_policy)?.entries;
-
-            // Sort for deterministic archives
-            if options.deterministic {
-                entries.sort();
-            }
-
-            let mut processed_size = 0u64;
-
-            for entry in entries {
-                let path = entry.as_path();
-                let relative_path = path.strip_prefix(base_path)?;
-                let path_str = utils::normalize_archive_path(relative_path);
-
-                let metadata = path.metadata()?;
-                let zip_time = zip_last_modified(&metadata, options.preserve_timestamps);
-                let permissions = if options.preserve_permissions {
-                    #[cfg(unix)]
-                    {
-                        metadata.permissions().mode()
-                    }
-                    #[cfg(not(unix))]
-                    {
-                        0o644
-                    }
-                } else {
-                    0o644
-                };
-                let current_file_options = base_file_options
-                    .last_modified_time(zip_time)
-                    .unix_permissions(permissions);
-
-                if path.is_file() {
+            match entry.kind {
+                PlannedEntryKind::File => {
                     zip_writer.start_file(path_str.as_str(), current_file_options)?;
 
-                    let mut file = File::open(path).with_context(|| {
-                        format!("Failed to open file for archiving {}", path.display())
+                    let mut file = File::open(&entry.disk_path).with_context(|| {
+                        format!(
+                            "Failed to open file for archiving {}",
+                            entry.disk_path.display()
+                        )
                     })?;
                     std::io::copy(&mut file, &mut zip_writer)?;
 
@@ -167,23 +103,8 @@ impl CompressionFormat for ZipFormat {
                     if let Some(progress) = progress {
                         progress.set_position(processed_size);
                     }
-                } else if path.is_dir() {
-                    let permissions = if options.preserve_permissions {
-                        #[cfg(unix)]
-                        {
-                            metadata.permissions().mode()
-                        }
-                        #[cfg(not(unix))]
-                        {
-                            0o755
-                        }
-                    } else {
-                        0o755
-                    };
-                    let current_file_options = base_file_options
-                        .last_modified_time(zip_time)
-                        .unix_permissions(permissions);
-
+                }
+                PlannedEntryKind::Directory => {
                     // Add directory entry with trailing slash
                     let dir_path = format!("{path_str}/");
                     zip_writer.add_directory(&dir_path, current_file_options)?;
@@ -194,7 +115,7 @@ impl CompressionFormat for ZipFormat {
         zip_writer.finish()?;
 
         let output_size = std::fs::metadata(output_path)?.len();
-        Ok(CompressionStats::new(input_size, output_size))
+        Ok(CompressionStats::new(plan.total_size, output_size))
     }
 
     fn extract(

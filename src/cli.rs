@@ -1,7 +1,7 @@
 //! command line interface
 
 use clap::{Parser, Subcommand};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(
@@ -80,8 +80,9 @@ pub enum Commands {
         #[arg(short = 'y', long)]
         overwrite: bool,
 
-        /// input file or directory
-        input: PathBuf,
+        /// input files or directories
+        #[arg(required = true)]
+        input: Vec<PathBuf>,
 
         /// password for encryption (supported by zst and 7z)
         #[arg(short = 'p', long)]
@@ -162,27 +163,35 @@ fn parse_format(s: &str) -> Result<crate::formats::Format, String> {
 impl Cli {
     /// get output path for compression, defaulting to input + appropriate extension
     pub fn get_output_path(
-        input: &Path,
+        input: &[PathBuf],
         output: Option<PathBuf>,
         format: Option<crate::formats::Format>,
-    ) -> PathBuf {
-        output.unwrap_or_else(|| {
-            let mut path = input.to_path_buf();
-            let extension = match format {
-                Some(f) => f.extension(),
-                None => "zst",
-            };
+    ) -> crate::Result<PathBuf> {
+        if let Some(output) = output {
+            return Ok(output);
+        }
 
-            if let Some(filename) = path.file_name() {
-                let mut new_filename = filename.to_os_string();
-                new_filename.push(".");
-                new_filename.push(extension);
-                path.set_file_name(new_filename);
-            } else {
-                path.set_extension(extension);
-            }
-            path
-        })
+        if input.len() != 1 {
+            return Err(anyhow::anyhow!(
+                "multiple inputs require an explicit output path with -o/--output"
+            ));
+        }
+
+        let mut path = input[0].to_path_buf();
+        let extension = match format {
+            Some(f) => f.extension(),
+            None => "zst",
+        };
+
+        if let Some(filename) = path.file_name() {
+            let mut new_filename = filename.to_os_string();
+            new_filename.push(".");
+            new_filename.push(extension);
+            path.set_file_name(new_filename);
+        } else {
+            path.set_extension(extension);
+        }
+        Ok(path)
     }
 
     /// get extraction directory, defaulting to current directory

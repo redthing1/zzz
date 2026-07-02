@@ -1,9 +1,9 @@
 //! compression format abstraction
 
-use crate::policy::SymlinkPolicy;
 use crate::Result;
+use crate::{archive_plan::ArchivePlan, policy::SymlinkPolicy};
 use anyhow::Context;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub mod gz;
 pub mod rar;
@@ -221,13 +221,32 @@ impl Format {
 
 /// trait for compression formats
 pub trait CompressionFormat {
+    fn compress_plan(
+        plan: &ArchivePlan,
+        output_path: &Path,
+        options: &CompressionOptions,
+        progress: Option<&crate::progress::Progress>,
+    ) -> Result<CompressionStats>;
+
     fn compress(
         input_path: &Path,
         output_path: &Path,
         options: &CompressionOptions,
         filter: &crate::filter::FileFilter,
         progress: Option<&crate::progress::Progress>,
-    ) -> Result<CompressionStats>;
+    ) -> Result<CompressionStats>
+    where
+        Self: Sized,
+    {
+        let input_paths = [PathBuf::from(input_path)];
+        let plan = ArchivePlan::from_paths(
+            &input_paths,
+            filter,
+            options.symlink_policy,
+            options.deterministic,
+        )?;
+        Self::compress_plan(&plan, output_path, options, progress)
+    }
 
     fn extract(
         archive_path: &Path,

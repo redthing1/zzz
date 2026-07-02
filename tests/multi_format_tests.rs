@@ -221,6 +221,66 @@ fn test_7z_format() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test]
+fn test_multiple_inputs_all_archive_formats() -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = TempDir::new()?;
+    let alpha_dir = temp_dir.path().join("alpha");
+    let beta_dir = temp_dir.path().join("beta");
+
+    fs::create_dir(&alpha_dir)?;
+    fs::write(alpha_dir.join("one.txt"), "alpha one")?;
+    fs::create_dir(&beta_dir)?;
+    fs::write(beta_dir.join("two.txt"), "beta two")?;
+
+    let formats = [
+        ("zst", "multi.zst"),
+        ("tgz", "multi.tgz"),
+        ("txz", "multi.txz"),
+        ("zip", "multi.zip"),
+        ("7z", "multi.7z"),
+    ];
+
+    for (format, output_name) in formats {
+        let output_file = temp_dir.path().join(output_name);
+        let extract_dir = temp_dir.path().join(format!("extract_{format}"));
+
+        let mut cmd = cargo_bin_cmd!("zzz");
+        cmd.arg("compress")
+            .arg("-f")
+            .arg(format)
+            .arg("-o")
+            .arg(&output_file)
+            .arg(&alpha_dir)
+            .arg(&beta_dir);
+        cmd.assert().success();
+
+        let mut cmd = cargo_bin_cmd!("zzz");
+        cmd.arg("list").arg(&output_file);
+        cmd.assert()
+            .success()
+            .stdout(predicate::str::contains("alpha/one.txt"))
+            .stdout(predicate::str::contains("beta/two.txt"));
+
+        let mut cmd = cargo_bin_cmd!("zzz");
+        cmd.arg("extract")
+            .arg(&output_file)
+            .arg("-C")
+            .arg(&extract_dir);
+        cmd.assert().success();
+
+        assert_eq!(
+            fs::read_to_string(extract_dir.join("alpha/one.txt"))?,
+            "alpha one"
+        );
+        assert_eq!(
+            fs::read_to_string(extract_dir.join("beta/two.txt"))?,
+            "beta two"
+        );
+    }
+
+    Ok(())
+}
+
+#[test]
 fn test_format_detection_by_magic() -> Result<(), Box<dyn std::error::Error>> {
     let temp_dir = TempDir::new()?;
     let test_file = temp_dir.path().join("test.txt");

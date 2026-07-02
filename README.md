@@ -32,6 +32,7 @@ cargo install --git https://github.com/redthing1/zzz --rev <commit> --locked
 ```sh
 # compress
 zzz c input/ -o archive.zst
+zzz c input/ old_input/ -o archive.zst
 zzz c file.txt -f 7z -p password
 zzz c file.txt -f gz -o file.txt.gz
 

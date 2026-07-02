@@ -185,6 +185,122 @@ fn test_compress_directory() -> Result<()> {
 }
 
 #[test]
+fn test_compress_multiple_inputs_preserves_each_root() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+    let sessions_dir = temp_dir.path().join("sessions");
+    let historical_dir = temp_dir.path().join("sessions_historical");
+    let output_file = temp_dir.path().join("dotcodex_sessions.zst");
+    let extract_dir = temp_dir.path().join("extract");
+
+    fs::create_dir(&sessions_dir)?;
+    fs::write(sessions_dir.join("current.jsonl"), "current session")?;
+    fs::create_dir(&historical_dir)?;
+    fs::write(historical_dir.join("old.jsonl"), "old session")?;
+
+    zzz_cmd()
+        .args(["compress", "-f", "zst", "-P"])
+        .arg(&sessions_dir)
+        .arg(&historical_dir)
+        .args(["-o"])
+        .arg(&output_file)
+        .assert()
+        .success();
+
+    zzz_cmd()
+        .args(["list"])
+        .arg(&output_file)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("sessions/current.jsonl"))
+        .stdout(predicate::str::contains("sessions_historical/old.jsonl"));
+
+    zzz_cmd()
+        .args(["extract", "-C"])
+        .arg(&extract_dir)
+        .arg(&output_file)
+        .assert()
+        .success();
+
+    assert_eq!(
+        fs::read_to_string(extract_dir.join("sessions/current.jsonl"))?,
+        "current session"
+    );
+    assert_eq!(
+        fs::read_to_string(extract_dir.join("sessions_historical/old.jsonl"))?,
+        "old session"
+    );
+
+    Ok(())
+}
+
+#[test]
+fn test_compress_multiple_inputs_requires_output() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+    let first = temp_dir.path().join("first.txt");
+    let second = temp_dir.path().join("second.txt");
+    fs::write(&first, "first")?;
+    fs::write(&second, "second")?;
+
+    zzz_cmd()
+        .args(["compress"])
+        .arg(&first)
+        .arg(&second)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("multiple inputs require"));
+
+    Ok(())
+}
+
+#[test]
+fn test_compress_multiple_inputs_rejects_archive_path_collision() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+    let left = temp_dir.path().join("left").join("same");
+    let right = temp_dir.path().join("right").join("same");
+    let output_file = temp_dir.path().join("collision.zst");
+
+    fs::create_dir_all(&left)?;
+    fs::write(left.join("left.txt"), "left")?;
+    fs::create_dir_all(&right)?;
+    fs::write(right.join("right.txt"), "right")?;
+
+    zzz_cmd()
+        .args(["compress", "-o"])
+        .arg(&output_file)
+        .arg(&left)
+        .arg(&right)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("archive path collision"));
+
+    Ok(())
+}
+
+#[test]
+fn test_compress_multiple_inputs_rejects_output_inside_any_input() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+    let first = temp_dir.path().join("first");
+    let second = temp_dir.path().join("second");
+    let output_file = second.join("archive.zst");
+
+    fs::create_dir(&first)?;
+    fs::write(first.join("first.txt"), "first")?;
+    fs::create_dir(&second)?;
+    fs::write(second.join("second.txt"), "second")?;
+
+    zzz_cmd()
+        .args(["compress", "-o"])
+        .arg(&output_file)
+        .arg(&first)
+        .arg(&second)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("inside input directory"));
+
+    Ok(())
+}
+
+#[test]
 fn test_compress_output_inside_input_rejected() -> Result<()> {
     let temp_dir = TempDir::new()?;
     let source_dir = temp_dir.path().join("input_dir");

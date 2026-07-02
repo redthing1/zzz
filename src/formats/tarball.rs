@@ -1,7 +1,7 @@
 //! Shared tarball helpers for tar-based formats.
 
 use crate::{
-    filter::FileFilter,
+    archive_plan::{ArchivePlan, PlannedEntryKind},
     formats::{ArchiveEntry, CompressionOptions, ExtractionOptions},
     progress::Progress,
     utils, Result,
@@ -12,7 +12,7 @@ use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::{
     fs::File,
     io::{Read, Write},
-    path::{Path, PathBuf},
+    path::Path,
 };
 use tar::{Archive, Builder, EntryType, HeaderMode};
 
@@ -22,9 +22,7 @@ const PAX_XATTR_PREFIX: &str = "SCHILY.xattr.";
 
 #[derive(Debug, Clone, Copy)]
 pub struct BuildOptions {
-    pub apply_filter_to_single_file: bool,
     pub directory_slash: bool,
-    pub set_mtime_for_single_file: bool,
 }
 
 #[cfg(unix)]
@@ -152,9 +150,8 @@ fn create_dir_header(
 
 pub fn build_tarball<W: Write>(
     writer: W,
-    input_path: &Path,
+    plan: &ArchivePlan,
     options: &CompressionOptions,
-    filter: &FileFilter,
     progress: Option<&Progress>,
     build_options: BuildOptions,
 ) -> Result<W> {
@@ -163,107 +160,51 @@ pub fn build_tarball<W: Write>(
 
     let mut bytes_processed = 0u64;
 
-    let archive_walk = utils::walk_archive_input(input_path, filter, options.symlink_policy)?;
-
-    if input_path.is_file() {
-        if build_options.apply_filter_to_single_file && archive_walk.entries.is_empty() {
-            return Ok(tar_builder.into_inner()?);
-        }
-
-        if options.preserve_xattrs {
-            append_xattrs(&mut tar_builder, input_path)?;
-        }
-
-        let file = File::open(input_path)
-            .with_context(|| format!("Failed to open input file {}", input_path.display()))?;
-        let metadata = file.metadata().with_context(|| {
-            format!(
-                "Failed to read metadata for input file {}",
-                input_path.display()
-            )
-        })?;
-        let mut header = create_file_header(
-            &metadata,
-            options,
-            options.preserve_timestamps && build_options.set_mtime_for_single_file,
-        )?;
-
-        let filename = input_path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "Could not determine filename from input path: {}",
-                    input_path.display()
-                )
-            })?;
-        tar_builder.append_data(&mut header, filename, file)?;
-
-        bytes_processed += metadata.len();
-        if let Some(progress) = progress {
-            progress.update(bytes_processed);
-        }
-
-        return Ok(tar_builder.into_inner()?);
-    }
-
-    let root_name = input_path.file_name();
-    let mut entries = archive_walk.entries;
-    if options.deterministic {
-        entries.sort();
-    }
-
-    for entry in entries {
-        let path = entry.as_path();
-        let relative = path.strip_prefix(input_path).unwrap_or(path);
-        let mut archive_path = PathBuf::new();
-        if let Some(root) = root_name {
-            archive_path.push(root);
-        }
-        if !relative.as_os_str().is_empty() {
-            archive_path.push(relative);
-        }
-
-        if path.is_file() {
-            let archive_path_str = utils::normalize_archive_path(&archive_path);
-            if options.preserve_xattrs {
-                append_xattrs(&mut tar_builder, path)?;
-            }
-
-            let file = File::open(path)
-                .with_context(|| format!("Failed to open file for archiving {}", path.display()))?;
-            let metadata = file.metadata()?;
-            let mut header = create_file_header(&metadata, options, options.preserve_timestamps)?;
-            tar_builder.append_data(&mut header, archive_path_str.as_str(), file)?;
-
-            bytes_processed += metadata.len();
-            if let Some(progress) = progress {
-                progress.update(bytes_processed);
-            }
-        } else if path.is_dir() {
-            if archive_path.as_os_str().is_empty() {
-                continue;
-            }
-
-            let archive_path_str = utils::normalize_archive_path(&archive_path);
-            if options.preserve_xattrs {
-                append_xattrs(&mut tar_builder, path)?;
-            }
-
-            let metadata = path.metadata()?;
-            let mut header = create_dir_header(&metadata, options, options.preserve_timestamps)?;
-            if build_options.directory_slash {
-                let mut dir_path = archive_path_str;
-                if !dir_path.ends_with('/') {
-                    dir_path.push('/');
+    for entry in &plan.entries {
+        let archive_path_str = utils::normalize_archive_path(&entry.archive_path);
+        match entry.kind {
+            PlannedEntryKind::File => {
+                if options.preserve_xattrs {
+                    append_xattrs(&mut tar_builder, &entry.disk_path)?;
                 }
-                tar_builder.append_data(&mut header, dir_path.as_str(), std::io::empty())?;
-            } else {
-                tar_builder.append_data(
-                    &mut header,
-                    archive_path_str.as_str(),
-                    std::io::empty(),
-                )?;
+
+                let file = File::open(&entry.disk_path).with_context(|| {
+                    format!(
+                        "Failed to open file for archiving {}",
+                        entry.disk_path.display()
+                    )
+                })?;
+                let metadata = file.metadata()?;
+                let mut header =
+                    create_file_header(&metadata, options, options.preserve_timestamps)?;
+                tar_builder.append_data(&mut header, archive_path_str.as_str(), file)?;
+
+                bytes_processed += metadata.len();
+                if let Some(progress) = progress {
+                    progress.update(bytes_processed);
+                }
+            }
+            PlannedEntryKind::Directory => {
+                if options.preserve_xattrs {
+                    append_xattrs(&mut tar_builder, &entry.disk_path)?;
+                }
+
+                let metadata = entry.disk_path.metadata()?;
+                let mut header =
+                    create_dir_header(&metadata, options, options.preserve_timestamps)?;
+                if build_options.directory_slash {
+                    let mut dir_path = archive_path_str;
+                    if !dir_path.ends_with('/') {
+                        dir_path.push('/');
+                    }
+                    tar_builder.append_data(&mut header, dir_path.as_str(), std::io::empty())?;
+                } else {
+                    tar_builder.append_data(
+                        &mut header,
+                        archive_path_str.as_str(),
+                        std::io::empty(),
+                    )?;
+                }
             }
         }
     }

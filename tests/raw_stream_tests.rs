@@ -1,6 +1,8 @@
 //! Tests for raw gzip/xz streams (non-tar)
 
+use assert_cmd::cargo::cargo_bin_cmd;
 use flate2::{write::GzEncoder, Compression};
+use predicates::prelude::*;
 use std::fs::{self, File};
 use tempfile::TempDir;
 use xz2::write::XzEncoder;
@@ -68,6 +70,50 @@ fn test_raw_xz_extract_and_list() -> Result<()> {
         fs::read_to_string(extract_dir.join("file.txt"))?,
         "raw xz content"
     );
+
+    Ok(())
+}
+
+#[test]
+fn test_raw_gzip_rejects_multiple_inputs() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+    let first = temp_dir.path().join("first.txt");
+    let second = temp_dir.path().join("second.txt");
+    let archive_path = temp_dir.path().join("out.gz");
+
+    fs::write(&first, "first")?;
+    fs::write(&second, "second")?;
+
+    let mut cmd = cargo_bin_cmd!("zzz");
+    cmd.arg("compress")
+        .arg("-o")
+        .arg(&archive_path)
+        .arg(&first)
+        .arg(&second);
+    cmd.assert().failure().stderr(predicate::str::contains(
+        "raw .gz output supports exactly one file input",
+    ));
+
+    Ok(())
+}
+
+#[test]
+fn test_raw_xz_rejects_directory_input() -> Result<()> {
+    let temp_dir = TempDir::new()?;
+    let source_dir = temp_dir.path().join("source");
+    let archive_path = temp_dir.path().join("out.xz");
+
+    fs::create_dir(&source_dir)?;
+    fs::write(source_dir.join("file.txt"), "content")?;
+
+    let mut cmd = cargo_bin_cmd!("zzz");
+    cmd.arg("compress")
+        .arg("-o")
+        .arg(&archive_path)
+        .arg(&source_dir);
+    cmd.assert().failure().stderr(predicate::str::contains(
+        "raw .xz output supports exactly one file input",
+    ));
 
     Ok(())
 }

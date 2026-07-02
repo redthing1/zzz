@@ -3,6 +3,7 @@
 //! This library provides functionality for creating and extracting archives in multiple
 //! formats (zst, tgz, txz, zip, 7z) with smart file filtering and security features.
 
+pub mod archive_plan;
 pub mod cli;
 pub mod compress;
 pub mod encryption;

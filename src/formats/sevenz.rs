@@ -1,7 +1,7 @@
 //! 7-Zip format support
 
 use crate::{
-    filter::FileFilter,
+    archive_plan::{ArchivePlan, PlannedEntryKind},
     formats::{
         ArchiveEntry, CompressionFormat, CompressionOptions, CompressionStats, ExtractionOptions,
     },
@@ -23,16 +23,12 @@ fn sanitize_entry_timestamps(entry: &mut SevenZArchiveEntry, options: &Compressi
 }
 
 impl CompressionFormat for SevenZFormat {
-    fn compress(
-        input_path: &Path,
+    fn compress_plan(
+        plan: &ArchivePlan,
         output_path: &Path,
         options: &CompressionOptions,
-        filter: &FileFilter,
         progress: Option<&Progress>,
     ) -> Result<CompressionStats> {
-        let input_size =
-            utils::calculate_directory_size(input_path, filter, options.symlink_policy)?;
-
         let mut sz = SevenZWriter::create(output_path).with_context(|| {
             format!(
                 "Failed to create 7-Zip writer for {}",
@@ -50,85 +46,39 @@ impl CompressionFormat for SevenZFormat {
         }
 
         if let Some(progress) = progress {
-            progress.set_length(input_size);
+            progress.set_length(plan.total_size);
         }
 
-        if input_path.is_file() {
-            // Single file compression
-            let filename_os = input_path.file_name().ok_or_else(|| {
-                anyhow::anyhow!(
-                    "Could not determine filename from input path: {}",
-                    input_path.display()
-                )
-            })?;
-            if !filter.should_include_relative(Path::new(filename_os)) {
-                sz.finish().with_context(|| {
-                    format!("Failed to finalize 7-Zip archive {}", output_path.display())
-                })?;
-                let output_size = std::fs::metadata(output_path)
-                    .with_context(|| {
-                        format!(
-                            "Failed to read metadata for output file {}",
-                            output_path.display()
-                        )
-                    })?
-                    .len();
-                return Ok(CompressionStats::new(input_size, output_size));
-            }
+        let mut processed_size = 0u64;
 
-            let filename = filename_os.to_str().ok_or_else(|| {
-                anyhow::anyhow!(
-                    "Could not determine filename from input path: {}",
-                    input_path.display()
-                )
-            })?;
+        for entry in &plan.entries {
+            let path_str = utils::normalize_archive_path(&entry.archive_path);
 
-            let mut entry = SevenZArchiveEntry::from_path(input_path, filename.to_string());
-            sanitize_entry_timestamps(&mut entry, options);
-            sz.push_archive_entry(
-                entry,
-                Some(File::open(input_path).with_context(|| {
-                    format!("Failed to open input file {}", input_path.display())
-                })?),
-            )?;
-        } else {
-            // Directory compression - preserve directory structure like our other formats
-            let base_path = input_path.parent().unwrap_or(input_path);
-            let mut entries =
-                utils::walk_archive_input(input_path, filter, options.symlink_policy)?.entries;
-
-            // Sort for deterministic archives
-            if options.deterministic {
-                entries.sort();
-            }
-
-            let mut processed_size = 0u64;
-
-            for entry in entries {
-                let path = entry.as_path();
-                let relative_path = path.strip_prefix(base_path)?;
-                let path_str = relative_path.to_string_lossy().to_string();
-
-                if path.is_file() {
-                    let mut archive_entry = SevenZArchiveEntry::from_path(path, path_str);
+            match entry.kind {
+                PlannedEntryKind::File => {
+                    let mut archive_entry =
+                        SevenZArchiveEntry::from_path(&entry.disk_path, path_str);
                     sanitize_entry_timestamps(&mut archive_entry, options);
                     sz.push_archive_entry(
                         archive_entry,
-                        Some(File::open(path).with_context(|| {
-                            format!("Failed to open file for archiving {}", path.display())
+                        Some(File::open(&entry.disk_path).with_context(|| {
+                            format!(
+                                "Failed to open file for archiving {}",
+                                entry.disk_path.display()
+                            )
                         })?),
                     )?;
 
-                    let metadata = path.metadata().with_context(|| {
-                        format!("Failed to read metadata for {}", path.display())
+                    let metadata = entry.disk_path.metadata().with_context(|| {
+                        format!("Failed to read metadata for {}", entry.disk_path.display())
                     })?;
                     processed_size += metadata.len();
 
                     if let Some(progress) = progress {
                         progress.set_position(processed_size);
                     }
-                } else if path.is_dir() {
-                    // Add directory entry
+                }
+                PlannedEntryKind::Directory => {
                     let mut archive_entry = SevenZArchiveEntry::new();
                     archive_entry.name = path_str;
                     archive_entry.is_directory = true;
@@ -149,7 +99,7 @@ impl CompressionFormat for SevenZFormat {
                 )
             })?
             .len();
-        Ok(CompressionStats::new(input_size, output_size))
+        Ok(CompressionStats::new(plan.total_size, output_size))
     }
 
     fn extract(

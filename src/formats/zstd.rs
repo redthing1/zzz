@@ -1,10 +1,10 @@
 //! zstd compression format implementation
 
+use crate::archive_plan::ArchivePlan;
 use crate::encryption::{
     self, DecryptingReader, EncryptingWriter, ARGON2_SALT_LEN, DEFAULT_ENCRYPTION_CHUNK_SIZE,
     ENCRYPTED_ZSTD_MAGIC,
 };
-use crate::filter::FileFilter;
 use crate::formats::{
     tarball, ArchiveEntry, CompressionFormat, CompressionOptions, CompressionStats,
     ExtractionOptions,
@@ -49,10 +49,9 @@ fn configure_threads<W: Write>(
 
 fn compress_tarball<W: Write>(
     writer: W,
-    input_path: &Path,
+    plan: &ArchivePlan,
     zstd_level: i32,
     options: &CompressionOptions,
-    filter: &FileFilter,
     progress: Option<&Progress>,
     build_options: tarball::BuildOptions,
 ) -> Result<()> {
@@ -60,14 +59,8 @@ fn compress_tarball<W: Write>(
         zstd::Encoder::new(writer, zstd_level).context("Failed to create ZSTD encoder")?;
     configure_threads(&mut zstd_encoder, options.threads)?;
 
-    let zstd_encoder = tarball::build_tarball(
-        zstd_encoder,
-        input_path,
-        options,
-        filter,
-        progress,
-        build_options,
-    )?;
+    let zstd_encoder =
+        tarball::build_tarball(zstd_encoder, plan, options, progress, build_options)?;
 
     drop(zstd_encoder.finish()?);
 
@@ -75,25 +68,18 @@ fn compress_tarball<W: Write>(
 }
 
 impl CompressionFormat for ZstdFormat {
-    fn compress(
-        input_path: &Path,
+    fn compress_plan(
+        plan: &ArchivePlan,
         output_path: &Path,
         options: &CompressionOptions,
-        filter: &FileFilter,
         progress: Option<&Progress>,
     ) -> Result<CompressionStats> {
-        // calculate input size for progress and stats
-        let input_size =
-            crate::utils::calculate_directory_size(input_path, filter, options.symlink_policy)?;
-
         // create output file
         let mut underlying_file = File::create(output_path)
             .with_context(|| format!("failed to create output file: {}", output_path.display()))?;
         let zstd_level = if options.level == 0 { 3 } else { options.level };
         let build_options = tarball::BuildOptions {
-            apply_filter_to_single_file: true,
             directory_slash: true,
-            set_mtime_for_single_file: true,
         };
 
         // Handle password-based encryption
@@ -118,20 +104,18 @@ impl CompressionFormat for ZstdFormat {
                     .context("Failed to create EncryptingWriter for ZSTD")?;
             compress_tarball(
                 encrypting_writer,
-                input_path,
+                plan,
                 zstd_level,
                 options,
-                filter,
                 progress,
                 build_options,
             )?;
         } else {
             compress_tarball(
                 underlying_file,
-                input_path,
+                plan,
                 zstd_level,
                 options,
-                filter,
                 progress,
                 build_options,
             )?;
@@ -141,10 +125,10 @@ impl CompressionFormat for ZstdFormat {
 
         // finalize progress
         if let Some(progress) = progress {
-            progress.update(input_size);
+            progress.update(plan.total_size);
         }
 
-        Ok(CompressionStats::new(input_size, output_size))
+        Ok(CompressionStats::new(plan.total_size, output_size))
     }
 
     fn extract(

@@ -1,7 +1,7 @@
 //! Gzip format support (tar.gz/tgz)
 
 use crate::{
-    filter::FileFilter,
+    archive_plan::ArchivePlan,
     formats::{
         tarball, ArchiveEntry, CompressionFormat, CompressionOptions, CompressionStats,
         ExtractionOptions,
@@ -64,21 +64,17 @@ fn gzip_mtime(path: &Path, options: &CompressionOptions) -> u32 {
 }
 
 impl CompressionFormat for GzipFormat {
-    fn compress(
-        input_path: &Path,
+    fn compress_plan(
+        plan: &ArchivePlan,
         output_path: &Path,
         options: &CompressionOptions,
-        filter: &FileFilter,
         progress: Option<&Progress>,
     ) -> Result<CompressionStats> {
-        let input_size =
-            utils::calculate_directory_size(input_path, filter, options.symlink_policy)?;
-
         // Map compression level (1-22) to gzip level (0-9)
         let gzip_level = (((options.level as f32 / 22.0) * 9.0) as u32).clamp(0, 9);
 
         if let Some(progress) = progress {
-            progress.set_length(input_size);
+            progress.set_length(plan.total_size);
         }
 
         // Password protection is not supported for Gzip format
@@ -88,25 +84,9 @@ impl CompressionFormat for GzipFormat {
             ));
         }
 
-        if input_path.is_file() {
-            if is_raw_gz(output_path) {
-                let filename = input_path.file_name();
-                if let Some(filename) = filename {
-                    if !filter.should_include_relative(Path::new(filename)) {
-                        let output_file = File::create(output_path).with_context(|| {
-                            format!("Failed to create output file {}", output_path.display())
-                        })?;
-                        let buf_writer = BufWriter::new(output_file);
-                        let encoder = GzBuilder::new()
-                            .mtime(0)
-                            .write(buf_writer, Compression::new(gzip_level));
-                        encoder.finish()?;
-                        let output_size = std::fs::metadata(output_path)?.len();
-                        return Ok(CompressionStats::new(input_size, output_size));
-                    }
-                }
-
-                let mtime = gzip_mtime(input_path, options);
+        if is_raw_gz(output_path) {
+            if let Some(entry) = plan.single_raw_file_entry("a .tgz or .tar.gz", "gz")? {
+                let mtime = gzip_mtime(&entry.disk_path, options);
                 let output_file = File::create(output_path).with_context(|| {
                     format!("Failed to create output file {}", output_path.display())
                 })?;
@@ -115,8 +95,8 @@ impl CompressionFormat for GzipFormat {
                     .mtime(mtime)
                     .write(buf_writer, Compression::new(gzip_level));
 
-                let mut input_file = File::open(input_path).with_context(|| {
-                    format!("Failed to open input file {}", input_path.display())
+                let mut input_file = File::open(&entry.disk_path).with_context(|| {
+                    format!("Failed to open input file {}", entry.disk_path.display())
                 })?;
                 std::io::copy(&mut input_file, &mut encoder)?;
                 encoder.finish()?;
@@ -125,28 +105,12 @@ impl CompressionFormat for GzipFormat {
                     format!("Failed to create output file {}", output_path.display())
                 })?;
                 let buf_writer = BufWriter::new(output_file);
-                let encoder = GzEncoder::new(buf_writer, Compression::new(gzip_level));
-                let encoder = tarball::build_tarball(
-                    encoder,
-                    input_path,
-                    options,
-                    filter,
-                    progress,
-                    tarball::BuildOptions {
-                        apply_filter_to_single_file: true,
-                        directory_slash: false,
-                        set_mtime_for_single_file: true,
-                    },
-                )?;
+                let encoder = GzBuilder::new()
+                    .mtime(0)
+                    .write(buf_writer, Compression::new(gzip_level));
                 encoder.finish()?;
             }
         } else {
-            if is_raw_gz(output_path) {
-                return Err(anyhow::anyhow!(
-                    "Directory input requires a .tgz or .tar.gz output"
-                ));
-            }
-
             let output_file = File::create(output_path).with_context(|| {
                 format!("Failed to create output file {}", output_path.display())
             })?;
@@ -154,21 +118,18 @@ impl CompressionFormat for GzipFormat {
             let encoder = GzEncoder::new(buf_writer, Compression::new(gzip_level));
             let encoder = tarball::build_tarball(
                 encoder,
-                input_path,
+                plan,
                 options,
-                filter,
                 progress,
                 tarball::BuildOptions {
-                    apply_filter_to_single_file: true,
                     directory_slash: false,
-                    set_mtime_for_single_file: true,
                 },
             )?;
             encoder.finish()?;
         }
 
         let output_size = std::fs::metadata(output_path)?.len();
-        Ok(CompressionStats::new(input_size, output_size))
+        Ok(CompressionStats::new(plan.total_size, output_size))
     }
 
     fn extract(

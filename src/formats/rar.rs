@@ -12,11 +12,10 @@ pub struct RarFormat;
 
 #[cfg(feature = "rar")]
 impl CompressionFormat for RarFormat {
-    fn compress(
-        _input_path: &Path,
+    fn compress_plan(
+        _plan: &crate::archive_plan::ArchivePlan,
         _output_path: &Path,
         _options: &crate::formats::CompressionOptions,
-        _filter: &crate::filter::FileFilter,
         _progress: Option<&crate::progress::Progress>,
     ) -> Result<CompressionStats> {
         Err(anyhow::anyhow!("RAR compression is not supported"))
@@ -127,11 +126,10 @@ pub struct RarFormat;
 
 #[cfg(not(feature = "rar"))]
 impl crate::formats::CompressionFormat for RarFormat {
-    fn compress(
-        _input_path: &std::path::Path,
+    fn compress_plan(
+        _plan: &crate::archive_plan::ArchivePlan,
         _output_path: &std::path::Path,
         _options: &crate::formats::CompressionOptions,
-        _filter: &crate::filter::FileFilter,
         _progress: Option<&crate::progress::Progress>,
     ) -> crate::Result<crate::formats::CompressionStats> {
         Err(rar_not_enabled_error())

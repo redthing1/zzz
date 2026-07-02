@@ -40,7 +40,7 @@ fn run(cli: Cli) -> zzz_arc::Result<()> {
             overwrite,
             password,
         } => {
-            let output_path = Cli::get_output_path(&input, output, format);
+            let output_path = Cli::get_output_path(&input, output, format)?;
 
             // check if output already exists and prompt user
             if output_path.exists() && !overwrite {
@@ -82,7 +82,7 @@ fn run(cli: Cli) -> zzz_arc::Result<()> {
             if !cli.verbose {
                 println!(
                     "compressed {} ({}) -> {} ({})",
-                    input.display(),
+                    format_inputs(&input),
                     zzz_arc::utils::format_bytes(stats.input_size),
                     output_path.display(),
                     zzz_arc::utils::format_bytes(stats.output_size)
@@ -156,4 +156,12 @@ fn run(cli: Cli) -> zzz_arc::Result<()> {
     }
 
     Ok(())
+}
+
+fn format_inputs(input: &[std::path::PathBuf]) -> String {
+    if input.len() == 1 {
+        return input[0].display().to_string();
+    }
+
+    format!("{} inputs", input.len())
 }
