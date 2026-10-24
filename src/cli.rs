@@ -1,6 +1,6 @@
 //! command line interface
 
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -84,9 +84,12 @@ pub enum Commands {
         #[arg(required = true)]
         input: Vec<PathBuf>,
 
-        /// password for encryption (supported by zst and 7z)
-        #[arg(short = 'p', long)]
-        password: Option<String>,
+        #[command(flatten)]
+        password: PasswordArgs,
+
+        /// Argon2id cost for encrypted zst: lo=256 MiB, med=1 GiB, hi=8 GiB (default: hi)
+        #[arg(long, value_enum)]
+        kdf: Option<crate::encryption::KdfPreset>,
     },
 
     /// extract archives (defaults: preserve perms+timestamps, ignore owner+xattrs)
@@ -126,9 +129,8 @@ pub enum Commands {
         #[arg(short = 'y', long)]
         overwrite: bool,
 
-        /// password for decryption (for zst and 7z)
-        #[arg(short = 'p', long)]
-        password: Option<String>,
+        #[command(flatten)]
+        password: PasswordArgs,
     },
 
     /// list archive contents
@@ -144,6 +146,45 @@ pub enum Commands {
         /// archive file to test
         archive: PathBuf,
     },
+}
+
+#[derive(Args)]
+pub struct PasswordArgs {
+    /// prompt securely for a password (zst and 7z; confirm when creating)
+    #[arg(short = 'p', long, conflicts_with = "password_stdin")]
+    password: bool,
+
+    /// read one password line from stdin, for scripts
+    #[arg(long, conflicts_with = "password")]
+    password_stdin: bool,
+}
+
+impl PasswordArgs {
+    pub fn uses_stdin(&self) -> bool {
+        self.password_stdin
+    }
+
+    pub fn is_requested(&self) -> bool {
+        self.password || self.password_stdin
+    }
+
+    pub fn resolve(&self, confirm: bool) -> crate::Result<Option<String>> {
+        use anyhow::{bail, Context};
+        use std::io::IsTerminal;
+
+        if self.password {
+            return crate::password::prompt(confirm).map(Some);
+        }
+        if self.password_stdin {
+            if std::io::stdin().is_terminal() {
+                bail!("--password-stdin requires redirected input; use -p for a hidden prompt");
+            }
+            return crate::password::read_line(&mut std::io::stdin().lock())
+                .context("Failed to read password from stdin")
+                .map(Some);
+        }
+        Ok(None)
+    }
 }
 
 /// Parse format string into Format enum
@@ -199,5 +240,55 @@ impl Cli {
         directory
             .or(destination)
             .unwrap_or_else(|| PathBuf::from("."))
+    }
+}
+
+#[cfg(test)]
+mod password_tests {
+    use super::*;
+
+    #[test]
+    fn password_flag_does_not_consume_paths() {
+        for flag in ["-p", "--password"] {
+            let cli = Cli::try_parse_from(["zzz", "c", flag, "input.txt"]).unwrap();
+            let Commands::Compress {
+                input,
+                password,
+                kdf,
+                ..
+            } = cli.command
+            else {
+                panic!("expected compress command");
+            };
+            assert_eq!(input, [PathBuf::from("input.txt")]);
+            assert!(password.is_requested());
+            assert!(!password.uses_stdin());
+            assert_eq!(kdf.unwrap_or_default(), crate::encryption::KdfPreset::Hi);
+
+            let cli = Cli::try_parse_from(["zzz", "x", flag, "archive.zst", "dest"]).unwrap();
+            let Commands::Extract {
+                archive,
+                destination,
+                ..
+            } = cli.command
+            else {
+                panic!("expected extract command");
+            };
+            assert_eq!(archive, PathBuf::from("archive.zst"));
+            assert_eq!(destination, Some(PathBuf::from("dest")));
+        }
+    }
+
+    #[test]
+    fn password_sources_conflict_and_inline_values_are_rejected() {
+        for command in ["c", "x"] {
+            assert!(
+                Cli::try_parse_from(["zzz", command, "file.zst", "-p", "--password-stdin",])
+                    .is_err()
+            );
+            assert!(
+                Cli::try_parse_from(["zzz", command, "file.zst", "--password=secret",]).is_err()
+            );
+        }
     }
 }

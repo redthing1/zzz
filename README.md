@@ -33,12 +33,14 @@ cargo install --git https://github.com/redthing1/zzz --rev <commit> --locked
 # compress
 zzz c input/ -o archive.zst
 zzz c input/ old_input/ -o archive.zst
-zzz c file.txt -f 7z -p password
+zzz c file.txt -p
+zzz c file.txt -p --kdf med
+zzz c file.txt -f 7z -p
 zzz c file.txt -f gz -o file.txt.gz
 
 # extract
 zzz x archive.zst
-zzz x archive.7z -p password -C output/
+zzz x archive.7z -p -C output/
 zzz x file.txt.gz -C output/
 zzz x archive.tgz -C output/ --strip-components 1
 
@@ -49,3 +51,4 @@ zzz l file.txt.xz
 # test integrity
 zzz t archive.7z
 ```
+

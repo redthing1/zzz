@@ -2,8 +2,7 @@
 
 use crate::archive_plan::ArchivePlan;
 use crate::encryption::{
-    self, DecryptingReader, EncryptingWriter, ARGON2_SALT_LEN, DEFAULT_ENCRYPTION_CHUNK_SIZE,
-    ENCRYPTED_ZSTD_MAGIC,
+    DecryptingReader, EncryptingWriter, EncryptionHeader, DEFAULT_ENCRYPTION_CHUNK_SIZE,
 };
 use crate::formats::{
     tarball, ArchiveEntry, CompressionFormat, CompressionOptions, CompressionStats,
@@ -13,7 +12,7 @@ use crate::progress::{Progress, ProgressReader};
 use crate::Result;
 use anyhow::{anyhow, bail, Context};
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{Read, Write};
 use std::path::Path;
 
 pub struct ZstdFormat;
@@ -74,6 +73,19 @@ impl CompressionFormat for ZstdFormat {
         options: &CompressionOptions,
         progress: Option<&Progress>,
     ) -> Result<CompressionStats> {
+        // Derive the key before creating or truncating the output file.
+        let encryption = options
+            .password
+            .as_deref()
+            .map(|password| {
+                let header = EncryptionHeader::new(options.kdf)?;
+                let key = header
+                    .derive_key(password)
+                    .context("Failed to derive encryption key for ZSTD compression")?;
+                Ok::<_, anyhow::Error>((header, key))
+            })
+            .transpose()?;
+
         // create output file
         let mut underlying_file = File::create(output_path)
             .with_context(|| format!("failed to create output file: {}", output_path.display()))?;
@@ -83,21 +95,10 @@ impl CompressionFormat for ZstdFormat {
         };
 
         // Handle password-based encryption
-        if let Some(password) = options
-            .password
-            .as_deref()
-            .filter(|password| !password.is_empty())
-        {
-            let (derived_key, salt) = encryption::derive_key(password, None)
-                .context("Failed to derive encryption key for ZSTD compression")?;
-
-            // Write magic header and salt
-            underlying_file
-                .write_all(ENCRYPTED_ZSTD_MAGIC)
-                .context("Failed to write encryption magic header")?;
-            underlying_file
-                .write_all(&salt)
-                .context("Failed to write encryption salt")?;
+        if let Some((header, derived_key)) = encryption {
+            header
+                .write_to(&mut underlying_file)
+                .context("Failed to write encryption header")?;
 
             let encrypting_writer =
                 EncryptingWriter::new(underlying_file, &derived_key, DEFAULT_ENCRYPTION_CHUNK_SIZE)
@@ -149,17 +150,10 @@ impl CompressionFormat for ZstdFormat {
             })?
             .len();
 
-        // Check for encryption magic header
-        let mut magic_buffer = [0u8; ENCRYPTED_ZSTD_MAGIC.len()];
-        let bytes_read = archive_file
-            .read(&mut magic_buffer)
-            .context("Failed to read initial bytes from archive for encryption check")?;
+        let header = EncryptionHeader::read_from(&mut archive_file)?;
 
         // Determine if this is an encrypted archive and set up the input stream
-        let (input_stream, bytes_offset): (Box<dyn Read>, u64) = if bytes_read
-            == ENCRYPTED_ZSTD_MAGIC.len()
-            && magic_buffer == *ENCRYPTED_ZSTD_MAGIC
-        {
+        let (input_stream, bytes_offset): (Box<dyn Read>, u64) = if let Some(header) = header {
             // This is an encrypted archive
             let password = options.password.as_deref().ok_or_else(|| {
                 anyhow!(
@@ -175,14 +169,9 @@ impl CompressionFormat for ZstdFormat {
                 );
             }
 
-            // Read the salt
-            let mut salt = vec![0u8; ARGON2_SALT_LEN];
-            archive_file
-                .read_exact(&mut salt)
-                .context("Failed to read salt from encrypted archive")?;
-
             // Derive the decryption key
-            let (derived_key, _used_salt) = encryption::derive_key(password, Some(&salt))
+            let derived_key = header
+                .derive_key(password)
                 .context("Failed to derive decryption key")?;
 
             // Create decrypting reader
@@ -190,16 +179,9 @@ impl CompressionFormat for ZstdFormat {
                 DecryptingReader::new(ProgressReader::new(archive_file, progress), &derived_key)
                     .context("Failed to create DecryptingReader for ZSTD")?;
 
-            (
-                Box::new(decrypting_reader),
-                (ENCRYPTED_ZSTD_MAGIC.len() + ARGON2_SALT_LEN) as u64,
-            )
+            (Box::new(decrypting_reader), header.size() as u64)
         } else {
             // This is a standard (unencrypted) archive
-            archive_file
-                .seek(SeekFrom::Start(0))
-                .context("Failed to rewind archive file for standard processing")?;
-
             if options.password.is_some()
                 && !options.password.as_deref().unwrap_or_default().is_empty()
             {
@@ -232,24 +214,13 @@ impl CompressionFormat for ZstdFormat {
         let mut archive_file = File::open(archive_path)
             .with_context(|| format!("failed to open archive file: {}", archive_path.display()))?;
 
-        // Check for encryption magic header
-        let mut magic_buffer = [0u8; ENCRYPTED_ZSTD_MAGIC.len()];
-        let bytes_read = archive_file
-            .read(&mut magic_buffer)
-            .context("Failed to read initial bytes from archive for encryption check")?;
-
         // If this is an encrypted archive, we can't list it without a password
-        if bytes_read == ENCRYPTED_ZSTD_MAGIC.len() && magic_buffer == *ENCRYPTED_ZSTD_MAGIC {
+        if EncryptionHeader::read_from(&mut archive_file)?.is_some() {
             return Err(anyhow!(
                 "Cannot list encrypted ZSTD archive '{}' - password required. Use the extract command with --password to access contents.",
                 archive_path.display()
             ));
         }
-
-        // This is a standard archive, proceed normally
-        archive_file
-            .seek(SeekFrom::Start(0))
-            .context("Failed to rewind archive file for standard processing")?;
 
         // create zstd decoder
         let decoder = zstd::Decoder::new(archive_file).with_context(|| {
@@ -271,29 +242,10 @@ impl CompressionFormat for ZstdFormat {
         let mut archive_file = File::open(archive_path)
             .with_context(|| format!("failed to open archive file: {}", archive_path.display()))?;
 
-        // Check for encryption magic header
-        let mut magic_buffer = [0u8; ENCRYPTED_ZSTD_MAGIC.len()];
-        let bytes_read = archive_file
-            .read(&mut magic_buffer)
-            .context("Failed to read initial bytes from archive for encryption check")?;
-
-        // If this is an encrypted archive, we can only verify the header format
-        if bytes_read == ENCRYPTED_ZSTD_MAGIC.len() && magic_buffer == *ENCRYPTED_ZSTD_MAGIC {
-            // For encrypted archives, we can check if the salt is readable
-            let mut salt = vec![0u8; ARGON2_SALT_LEN];
-            archive_file
-                .read_exact(&mut salt)
-                .context("Failed to read salt from encrypted archive")?;
-
-            // If we got here, the header format is valid
-            // Full integrity testing would require a password, but basic format is OK
+        // Encrypted contents require a password; only the header is checked here.
+        if EncryptionHeader::read_from(&mut archive_file)?.is_some() {
             return Ok(());
         }
-
-        // This is a standard archive, proceed with full integrity testing
-        archive_file
-            .seek(SeekFrom::Start(0))
-            .context("Failed to rewind archive file for standard processing")?;
 
         // Check if this is a tar.zst or single .zst file
         if archive_path

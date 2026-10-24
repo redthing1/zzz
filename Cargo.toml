@@ -27,8 +27,10 @@ xattr = "1.6.1"
 time = "0.3.44"
 filetime = "0.2.26"
 # encryption dependencies
-argon2 = "0.5.3"
+argon2 = { version = "0.5.3", features = ["zeroize"] }
 aes-gcm = "0.10.3"
+rpassword = "7.5.4"
+zeroize = "1.8.2"
 # compression formats
 flate2 = "1.1.5"  # gz
 xz2 = "0.1.7"     # xz

@@ -7,8 +7,9 @@
 
 use crate::Result;
 use anyhow::{anyhow, bail, Context};
-use argon2::Argon2;
-use std::io::{self, ErrorKind, Read};
+use argon2::{Algorithm, Argon2, Block, Params, Version};
+use std::io::{self, ErrorKind, Read, Seek, SeekFrom, Write};
+use zeroize::Zeroizing;
 
 // AES-GCM imports
 use aes_gcm::{
@@ -24,16 +25,157 @@ pub const TAG_SIZE: usize = 16; // 128 bits, standard for GCM
 // Argon2id parameters
 pub const ARGON2_SALT_LEN: usize = 16; // Bytes
 
-// Default Argon2 parameters (secure but reasonable performance)
+// High-cost default: 8 GiB, three passes, four lanes. Memory is in KiB.
 pub const ARGON2_TIME_COST: u32 = 3;
-pub const ARGON2_MEM_COST: u32 = 65536; // 64 MiB
+pub const ARGON2_MEM_COST: u32 = 8 * 1024 * 1024;
 pub const ARGON2_LANES: u32 = 4;
 
-// Magic string to identify encrypted ZSTD files
-pub const ENCRYPTED_ZSTD_MAGIC: &[u8; 11] = b"ZSTDECRYPT1";
+const LEGACY_ENCRYPTED_ZSTD_MAGIC: &[u8; 11] = b"ZSTDECRYPT1";
+pub const ENCRYPTED_ZSTD_MAGIC: &[u8; 11] = b"ZSTDECRYPT2";
 
-// Size of the header for encrypted files = magic + salt_len
-pub const ENCRYPTION_HEADER_SIZE: usize = ENCRYPTED_ZSTD_MAGIC.len() + ARGON2_SALT_LEN;
+// v2: magic + memory KiB, passes, lanes (three big-endian u32s) + salt.
+// Both versions use Argon2id v0x13 with a 32-byte output.
+pub const ENCRYPTION_HEADER_SIZE: usize = ENCRYPTED_ZSTD_MAGIC.len() + 12 + ARGON2_SALT_LEN;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, clap::ValueEnum)]
+pub enum KdfPreset {
+    Lo,
+    Med,
+    #[default]
+    Hi,
+}
+
+impl KdfPreset {
+    fn parameters(self) -> KdfParameters {
+        KdfParameters {
+            memory_kib: match self {
+                Self::Lo => 256 * 1024,
+                Self::Med => 1024 * 1024,
+                Self::Hi => ARGON2_MEM_COST,
+            },
+            passes: ARGON2_TIME_COST,
+            lanes: ARGON2_LANES,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct KdfParameters {
+    memory_kib: u32,
+    passes: u32,
+    lanes: u32,
+}
+
+impl KdfParameters {
+    const LEGACY: Self = Self {
+        memory_kib: 65536,
+        passes: 3,
+        lanes: 4,
+    };
+
+    fn validate(self) -> Result<Params> {
+        // Bound untrusted header costs before allocation or derivation.
+        if self.memory_kib > ARGON2_MEM_COST
+            || self.passes > 10
+            || self.lanes > 16
+            || u64::from(self.memory_kib) * u64::from(self.passes)
+                > u64::from(ARGON2_MEM_COST) * u64::from(ARGON2_TIME_COST)
+        {
+            bail!("Argon2 parameters exceed supported resource limits");
+        }
+        Params::new(self.memory_kib, self.passes, self.lanes, Some(AES_KEY_SIZE))
+            .map_err(|e| anyhow!("Invalid Argon2 parameters: {e}"))
+    }
+}
+
+/// Recognize the encrypted format family, including unsupported versions.
+pub(crate) fn is_encrypted_zstd(bytes: &[u8]) -> bool {
+    bytes.starts_with(b"ZSTDECRYPT")
+}
+
+pub(crate) struct EncryptionHeader {
+    parameters: KdfParameters,
+    salt: [u8; ARGON2_SALT_LEN],
+    legacy: bool,
+}
+
+impl EncryptionHeader {
+    pub fn new(preset: KdfPreset) -> Result<Self> {
+        let mut salt = [0u8; ARGON2_SALT_LEN];
+        AeadOsRng
+            .try_fill_bytes(&mut salt)
+            .context("Failed to generate random salt for Argon2")?;
+        Ok(Self {
+            parameters: preset.parameters(),
+            salt,
+            legacy: false,
+        })
+    }
+
+    pub fn write_to(&self, writer: &mut impl Write) -> Result<()> {
+        writer.write_all(ENCRYPTED_ZSTD_MAGIC)?;
+        for value in [
+            self.parameters.memory_kib,
+            self.parameters.passes,
+            self.parameters.lanes,
+        ] {
+            writer.write_all(&value.to_be_bytes())?;
+        }
+        writer.write_all(&self.salt)?;
+        Ok(())
+    }
+
+    /// Read and validate a header, rewinding if this is a standard ZSTD stream.
+    pub fn read_from(reader: &mut (impl Read + Seek)) -> Result<Option<Self>> {
+        let start = reader.stream_position()?;
+        let mut magic = Vec::with_capacity(ENCRYPTED_ZSTD_MAGIC.len());
+        reader
+            .take(ENCRYPTED_ZSTD_MAGIC.len() as u64)
+            .read_to_end(&mut magic)?;
+        if !is_encrypted_zstd(&magic) {
+            reader.seek(SeekFrom::Start(start))?;
+            return Ok(None);
+        }
+        let legacy = magic == LEGACY_ENCRYPTED_ZSTD_MAGIC;
+        let parameters = if legacy {
+            KdfParameters::LEGACY
+        } else if magic == ENCRYPTED_ZSTD_MAGIC {
+            let mut encoded = [0u8; 12];
+            reader
+                .read_exact(&mut encoded)
+                .context("Truncated Argon2 parameters")?;
+            KdfParameters {
+                memory_kib: u32::from_be_bytes(encoded[..4].try_into().unwrap()),
+                passes: u32::from_be_bytes(encoded[4..8].try_into().unwrap()),
+                lanes: u32::from_be_bytes(encoded[8..].try_into().unwrap()),
+            }
+        } else {
+            bail!("Unsupported or truncated encrypted ZSTD header version");
+        };
+        parameters.validate()?;
+        let mut salt = [0u8; ARGON2_SALT_LEN];
+        reader
+            .read_exact(&mut salt)
+            .context("Failed to read salt from encrypted archive")?;
+        Ok(Some(Self {
+            parameters,
+            salt,
+            legacy,
+        }))
+    }
+
+    pub fn size(&self) -> usize {
+        if self.legacy {
+            LEGACY_ENCRYPTED_ZSTD_MAGIC.len() + ARGON2_SALT_LEN
+        } else {
+            ENCRYPTION_HEADER_SIZE
+        }
+    }
+
+    pub fn derive_key(&self, password: &str) -> Result<Zeroizing<Vec<u8>>> {
+        derive_key_with_parameters(password, &self.salt, self.parameters).map(Zeroizing::new)
+    }
+}
 
 // Default chunk size for encryption (plaintext)
 pub const DEFAULT_ENCRYPTION_CHUNK_SIZE: usize = 64 * 1024;
@@ -44,6 +186,14 @@ pub const MAX_ENCRYPTED_CHUNK_LEN: usize = DEFAULT_ENCRYPTION_CHUNK_SIZE * 16 + 
 ///
 /// Returns (derived_key, salt) where salt is either the provided salt or a new random salt
 pub fn derive_key(password: &str, salt_opt: Option<&[u8]>) -> Result<(Vec<u8>, Vec<u8>)> {
+    derive_key_with_preset(password, salt_opt, KdfPreset::default())
+}
+
+fn derive_key_with_preset(
+    password: &str,
+    salt_opt: Option<&[u8]>,
+    preset: KdfPreset,
+) -> Result<(Vec<u8>, Vec<u8>)> {
     let salt = match salt_opt {
         Some(s) => {
             if s.len() != ARGON2_SALT_LEN {
@@ -64,23 +214,32 @@ pub fn derive_key(password: &str, salt_opt: Option<&[u8]>) -> Result<(Vec<u8>, V
         }
     };
 
-    // Use Argon2id with specified parameters
-    use argon2::{Algorithm, Params, Version};
-    let params = Params::new(
-        ARGON2_MEM_COST,
-        ARGON2_TIME_COST,
-        ARGON2_LANES,
-        Some(AES_KEY_SIZE),
-    )
-    .map_err(|e| anyhow!("Failed to create Argon2 parameters: {e}"))?;
+    let derived_key = derive_key_with_parameters(password, &salt, preset.parameters())?;
+    Ok((derived_key, salt))
+}
+
+fn derive_key_with_parameters(
+    password: &str,
+    salt: &[u8],
+    parameters: KdfParameters,
+) -> Result<Vec<u8>> {
+    if password.is_empty() {
+        bail!("Password cannot be empty");
+    }
+    let params = parameters.validate()?;
+    let mut memory = Zeroizing::new(Vec::new());
+    memory
+        .try_reserve_exact(params.block_count())
+        .context("Cannot allocate memory for Argon2")?;
+    memory.resize(params.block_count(), Block::default());
     let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
 
     let mut derived_key = vec![0u8; AES_KEY_SIZE];
     argon2
-        .hash_password_into(password.as_bytes(), &salt, &mut derived_key)
+        .hash_password_into_with_memory(password.as_bytes(), salt, &mut derived_key, &mut *memory)
         .map_err(|e| anyhow!("Argon2 key derivation failed: {e}"))?;
 
-    Ok((derived_key, salt))
+    Ok(derived_key)
 }
 
 /// A writer that encrypts data in chunks using AES-256-GCM before writing to the underlying writer
@@ -323,13 +482,75 @@ mod tests {
     use std::io::{Cursor, Read, Write};
 
     #[test]
+    fn headers_store_costs_for_every_preset() -> Result<()> {
+        for (preset, memory_kib) in [
+            (KdfPreset::Lo, 256 * 1024_u32),
+            (KdfPreset::Med, 1024 * 1024),
+            (KdfPreset::Hi, 8 * 1024 * 1024),
+        ] {
+            let header = EncryptionHeader::new(preset)?;
+            let mut encoded = Vec::new();
+            header.write_to(&mut encoded)?;
+            assert_eq!(encoded.len(), ENCRYPTION_HEADER_SIZE);
+            assert_eq!(&encoded[11..15], &memory_kib.to_be_bytes());
+            assert_eq!(&encoded[15..19], &3_u32.to_be_bytes());
+            assert_eq!(&encoded[19..23], &4_u32.to_be_bytes());
+            let decoded = EncryptionHeader::read_from(&mut Cursor::new(encoded))?.unwrap();
+            assert_eq!(decoded.parameters, header.parameters);
+            assert_eq!(decoded.salt, header.salt);
+            assert_eq!(decoded.size(), ENCRYPTION_HEADER_SIZE);
+        }
+        assert_eq!(KdfPreset::default(), KdfPreset::Hi);
+        Ok(())
+    }
+
+    #[test]
+    fn invalid_header_costs_are_rejected_before_derivation() -> Result<()> {
+        let mut encoded = Vec::new();
+        EncryptionHeader::new(KdfPreset::Hi)?.write_to(&mut encoded)?;
+        for (offset, value) in [
+            (11, 0),
+            (11, u32::MAX),
+            (15, 0),
+            (15, 4),
+            (15, u32::MAX),
+            (19, 0),
+            (19, u32::MAX),
+        ] {
+            let mut corrupted = encoded.clone();
+            corrupted[offset..offset + 4].copy_from_slice(&value.to_be_bytes());
+            assert!(EncryptionHeader::read_from(&mut Cursor::new(corrupted)).is_err());
+        }
+        for len in 10..encoded.len() {
+            assert!(EncryptionHeader::read_from(&mut Cursor::new(&encoded[..len])).is_err());
+        }
+        encoded[10] = b'9';
+        assert!(EncryptionHeader::read_from(&mut Cursor::new(encoded)).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn legacy_headers_keep_original_parameters_and_plain_streams_rewind() -> Result<()> {
+        let mut encoded = LEGACY_ENCRYPTED_ZSTD_MAGIC.to_vec();
+        encoded.extend_from_slice(&[7; ARGON2_SALT_LEN]);
+        let decoded = EncryptionHeader::read_from(&mut Cursor::new(encoded))?.unwrap();
+        assert_eq!(decoded.parameters, KdfParameters::LEGACY);
+        assert_eq!(decoded.size(), 27);
+
+        let mut plain = Cursor::new(b"\x28\xb5\x2f\xfdplain zstd data");
+        assert!(EncryptionHeader::read_from(&mut plain)?.is_none());
+        assert_eq!(plain.position(), 0);
+        Ok(())
+    }
+
+    #[test]
     fn test_derive_key_new_salt() {
         let password = "test_password";
-        let (key1, salt1) = derive_key(password, None).unwrap();
+        let (key1, salt1) = derive_key_with_preset(password, None, KdfPreset::Lo).unwrap();
         assert_eq!(key1.len(), AES_KEY_SIZE);
         assert_eq!(salt1.len(), ARGON2_SALT_LEN);
 
-        let (key2, salt2) = derive_key(password, None).unwrap();
+        let (key2, salt2) = derive_key_with_preset(password, None, KdfPreset::Lo).unwrap();
         assert_eq!(key2.len(), AES_KEY_SIZE);
         assert_eq!(salt2.len(), ARGON2_SALT_LEN);
         assert_ne!(salt1, salt2);
@@ -342,11 +563,13 @@ mod tests {
         let mut salt = vec![0u8; ARGON2_SALT_LEN];
         AeadOsRng.try_fill_bytes(&mut salt).unwrap();
 
-        let (key1, used_salt1) = derive_key(password, Some(&salt)).unwrap();
+        let (key1, used_salt1) =
+            derive_key_with_preset(password, Some(&salt), KdfPreset::Lo).unwrap();
         assert_eq!(key1.len(), AES_KEY_SIZE);
         assert_eq!(used_salt1, salt);
 
-        let (key2, used_salt2) = derive_key(password, Some(&salt)).unwrap();
+        let (key2, used_salt2) =
+            derive_key_with_preset(password, Some(&salt), KdfPreset::Lo).unwrap();
         assert_eq!(key2, key1);
         assert_eq!(used_salt2, salt);
     }

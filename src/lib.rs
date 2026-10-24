@@ -12,6 +12,7 @@ pub mod extract;
 pub mod filter;
 pub mod formats;
 pub mod list;
+mod password;
 pub mod policy;
 pub mod progress;
 pub mod utils;

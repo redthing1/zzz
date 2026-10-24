@@ -39,7 +39,10 @@ fn run_compress_command(
         cmd.arg("-f").arg(fmt);
     }
     if let Some(pass) = password {
-        cmd.arg("--password").arg(pass);
+        cmd.arg("--password-stdin").write_stdin(pass);
+        if format_arg == Some("zst") {
+            cmd.args(["--kdf", "lo"]);
+        }
     }
 
     cmd.assert().success();
@@ -151,7 +154,8 @@ fn test_password_protection_flows() -> Result<()> {
         let extract_dir_correct = tmp_dir.path().join("extract_correct_pwd");
         fs::create_dir(&extract_dir_correct)?;
         zzz_cmd()
-            .args(["extract", "--password", password, "-C"])
+            .write_stdin(password)
+            .args(["extract", "--password-stdin", "-C"])
             .arg(&extract_dir_correct)
             .arg(&archive_path)
             .assert()
@@ -171,7 +175,8 @@ fn test_password_protection_flows() -> Result<()> {
         let extract_dir_incorrect = tmp_dir.path().join("extract_incorrect_pwd");
         fs::create_dir(&extract_dir_incorrect)?;
         zzz_cmd()
-            .args(["extract", "--password", "wrongpassword", "-C"])
+            .write_stdin("wrongpassword")
+            .args(["extract", "--password-stdin", "-C"])
             .arg(&extract_dir_incorrect)
             .arg(&archive_path)
             .assert()
@@ -230,7 +235,8 @@ fn test_zip_password_rejection() -> Result<()> {
 
     // Test that compressing with password fails for ZIP
     zzz_cmd()
-        .args(["compress", "--password", "test123", "-f", "zip", "-o"])
+        .write_stdin("test123")
+        .args(["compress", "--password-stdin", "-f", "zip", "-o"])
         .arg(&output_archive)
         .arg(&input_file)
         .assert()
@@ -250,12 +256,14 @@ fn test_zstd_password_support() -> Result<()> {
 
     // Test that threaded compression with password succeeds for ZSTD
     zzz_cmd()
+        .write_stdin("zstdtest123")
         .args([
             "-j",
             "2",
             "compress",
-            "--password",
-            "zstdtest123",
+            "--password-stdin",
+            "--kdf",
+            "lo",
             "-f",
             "zst",
             "-o",
@@ -271,7 +279,8 @@ fn test_zstd_password_support() -> Result<()> {
     let extract_dir = tmp_dir.path().join("extract");
     fs::create_dir(&extract_dir)?;
     zzz_cmd()
-        .args(["extract", "--password", "zstdtest123", "-C"])
+        .write_stdin("zstdtest123")
+        .args(["extract", "--password-stdin", "-C"])
         .arg(&extract_dir)
         .arg(&output_archive)
         .assert()
@@ -310,7 +319,9 @@ fn test_zstd_encryption_comprehensive() -> Result<()> {
 
     // Compress with password
     zzz_cmd()
-        .args(["compress", "--password", password, "-f", "zst", "-o"])
+        .write_stdin(password)
+        .args(["compress", "--password-stdin", "--kdf", "lo"])
+        .args(["-f", "zst", "-o"])
         .arg(&output_archive)
         .arg(&input_dir)
         .assert()
@@ -322,7 +333,8 @@ fn test_zstd_encryption_comprehensive() -> Result<()> {
     let extract_dir = tmp_dir.path().join("extracted");
     fs::create_dir(&extract_dir)?;
     zzz_cmd()
-        .args(["extract", "--password", password, "-C"])
+        .write_stdin(password)
+        .args(["extract", "--password-stdin", "-C"])
         .arg(&extract_dir)
         .arg(&output_archive)
         .assert()
@@ -379,18 +391,24 @@ fn test_zstd_encryption_edge_cases() -> Result<()> {
     let output_archive = tmp_dir.path().join("empty_pass.zst");
 
     zzz_cmd()
-        .args(["compress", "--password", "", "-f", "zst", "-o"])
+        .write_stdin("")
+        .args(["compress", "--password-stdin", "--kdf", "lo"])
+        .args(["-f", "zst", "-o"])
         .arg(&output_archive)
         .arg(&input_file)
         .assert()
-        .success(); // Empty password should still work (just means no encryption)
+        .failure()
+        .stderr(predicate::str::contains("Password cannot be empty"));
+    assert!(!output_archive.exists());
 
     // Test with very long password
     let long_password = "a".repeat(1000);
     let output_archive2 = tmp_dir.path().join("long_pass.zst");
 
     zzz_cmd()
-        .args(["compress", "--password", &long_password, "-f", "zst", "-o"])
+        .write_stdin(long_password.as_str())
+        .args(["compress", "--password-stdin", "--kdf", "lo"])
+        .args(["-f", "zst", "-o"])
         .arg(&output_archive2)
         .arg(&input_file)
         .assert()
@@ -400,7 +418,8 @@ fn test_zstd_encryption_edge_cases() -> Result<()> {
     let extract_dir = tmp_dir.path().join("extract_long");
     fs::create_dir(&extract_dir)?;
     zzz_cmd()
-        .args(["extract", "--password", &long_password, "-C"])
+        .write_stdin(long_password.as_str())
+        .args(["extract", "--password-stdin", "-C"])
         .arg(&extract_dir)
         .arg(&output_archive2)
         .assert()
@@ -411,14 +430,9 @@ fn test_zstd_encryption_edge_cases() -> Result<()> {
     let output_archive3 = tmp_dir.path().join("special_pass.zst");
 
     zzz_cmd()
-        .args([
-            "compress",
-            "--password",
-            special_password,
-            "-f",
-            "zst",
-            "-o",
-        ])
+        .write_stdin(special_password)
+        .args(["compress", "--password-stdin", "--kdf", "lo"])
+        .args(["-f", "zst", "-o"])
         .arg(&output_archive3)
         .arg(&input_file)
         .assert()
@@ -427,7 +441,8 @@ fn test_zstd_encryption_edge_cases() -> Result<()> {
     let extract_dir2 = tmp_dir.path().join("extract_special");
     fs::create_dir(&extract_dir2)?;
     zzz_cmd()
-        .args(["extract", "--password", special_password, "-C"])
+        .write_stdin(special_password)
+        .args(["extract", "--password-stdin", "-C"])
         .arg(&extract_dir2)
         .arg(&output_archive3)
         .assert()
@@ -453,7 +468,9 @@ fn test_zstd_encryption_vs_standard() -> Result<()> {
     // Create encrypted archive
     let encrypted_archive = tmp_dir.path().join("encrypted.zst");
     zzz_cmd()
-        .args(["compress", "--password", "testpass", "-f", "zst", "-o"])
+        .write_stdin("testpass")
+        .args(["compress", "--password-stdin", "--kdf", "lo"])
+        .args(["-f", "zst", "-o"])
         .arg(&encrypted_archive)
         .arg(&input_file)
         .assert()
@@ -494,7 +511,8 @@ fn test_zstd_encryption_vs_standard() -> Result<()> {
     let extract_standard_with_pass = tmp_dir.path().join("extract_standard_pass");
     fs::create_dir(&extract_standard_with_pass)?;
     zzz_cmd()
-        .args(["extract", "--password", "unused", "-C"])
+        .write_stdin("unused")
+        .args(["extract", "--password-stdin", "-C"])
         .arg(&extract_standard_with_pass)
         .arg(&standard_archive)
         .assert()
@@ -521,7 +539,9 @@ fn test_zstd_encryption_list_command() -> Result<()> {
     // Create encrypted archive
     let encrypted_archive = tmp_dir.path().join("encrypted_list.zst");
     zzz_cmd()
-        .args(["compress", "--password", "listpass", "-f", "zst", "-o"])
+        .write_stdin("listpass")
+        .args(["compress", "--password-stdin", "--kdf", "lo"])
+        .args(["-f", "zst", "-o"])
         .arg(&encrypted_archive)
         .arg(&input_file)
         .assert()
@@ -565,7 +585,9 @@ fn test_zstd_encryption_test_command() -> Result<()> {
     // Create encrypted archive
     let encrypted_archive = tmp_dir.path().join("encrypted_test.zst");
     zzz_cmd()
-        .args(["compress", "--password", "testcmdpass", "-f", "zst", "-o"])
+        .write_stdin("testcmdpass")
+        .args(["compress", "--password-stdin", "--kdf", "lo"])
+        .args(["-f", "zst", "-o"])
         .arg(&encrypted_archive)
         .arg(&input_file)
         .assert()
@@ -600,10 +622,12 @@ fn test_zstd_encryption_compression_levels() -> Result<()> {
         let output_archive = tmp_dir.path().join(format!("level_{level}.zst"));
 
         zzz_cmd()
+            .write_stdin("leveltest")
             .args([
                 "compress",
-                "--password",
-                "leveltest",
+                "--password-stdin",
+                "--kdf",
+                "lo",
                 "-f",
                 "zst",
                 "--level",
@@ -621,7 +645,8 @@ fn test_zstd_encryption_compression_levels() -> Result<()> {
         let extract_dir = tmp_dir.path().join(format!("extract_{level}"));
         fs::create_dir(&extract_dir)?;
         zzz_cmd()
-            .args(["extract", "--password", "leveltest", "-C"])
+            .write_stdin("leveltest")
+            .args(["extract", "--password-stdin", "-C"])
             .arg(&extract_dir)
             .arg(&output_archive)
             .assert()
@@ -643,7 +668,9 @@ fn test_zstd_encryption_corruption_handling() -> Result<()> {
     // Create encrypted archive
     let archive_path = tmp_dir.path().join("corrupt_test.zst");
     zzz_cmd()
-        .args(["compress", "--password", "corrupttest", "-f", "zst", "-o"])
+        .write_stdin("corrupttest")
+        .args(["compress", "--password-stdin", "--kdf", "lo"])
+        .args(["-f", "zst", "-o"])
         .arg(&archive_path)
         .arg(&input_file)
         .assert()
@@ -658,7 +685,7 @@ fn test_zstd_encryption_corruption_handling() -> Result<()> {
 
     // Corrupt different parts of the archive
     let corruption_positions = [
-        20,                       // Header corruption
+        30,                       // Salt corruption
         original_data.len() / 2,  // Middle corruption
         original_data.len() - 20, // End corruption (auth tag area)
     ];
@@ -677,7 +704,8 @@ fn test_zstd_encryption_corruption_handling() -> Result<()> {
         fs::create_dir(&extract_dir)?;
 
         zzz_cmd()
-            .args(["extract", "--password", "corrupttest", "-C"])
+            .write_stdin("corrupttest")
+            .args(["extract", "--password-stdin", "-C"])
             .arg(&extract_dir)
             .arg(&corrupted_archive)
             .assert()
@@ -707,7 +735,9 @@ fn test_zstd_encryption_large_files() -> Result<()> {
 
     // Compress large file with encryption
     zzz_cmd()
-        .args(["compress", "--password", password, "-f", "zst", "-o"])
+        .write_stdin(password)
+        .args(["compress", "--password-stdin", "--kdf", "lo"])
+        .args(["-f", "zst", "-o"])
         .arg(&archive_path)
         .arg(&input_file)
         .assert()
@@ -719,7 +749,8 @@ fn test_zstd_encryption_large_files() -> Result<()> {
     let extract_dir = tmp_dir.path().join("extract_large");
     fs::create_dir(&extract_dir)?;
     zzz_cmd()
-        .args(["extract", "--password", password, "-C"])
+        .write_stdin(password)
+        .args(["extract", "--password-stdin", "-C"])
         .arg(&extract_dir)
         .arg(&archive_path)
         .assert()
@@ -756,7 +787,9 @@ fn test_zstd_encryption_multiple_files() -> Result<()> {
 
     // Compress directory with multiple files with encryption
     zzz_cmd()
-        .args(["compress", "--password", password, "-f", "zst", "-o"])
+        .write_stdin(password)
+        .args(["compress", "--password-stdin", "--kdf", "lo"])
+        .args(["-f", "zst", "-o"])
         .arg(&archive_path)
         .arg(&input_dir)
         .assert()
@@ -768,7 +801,8 @@ fn test_zstd_encryption_multiple_files() -> Result<()> {
     let extract_dir = tmp_dir.path().join("extract_multi");
     fs::create_dir(&extract_dir)?;
     zzz_cmd()
-        .args(["extract", "--password", password, "-C"])
+        .write_stdin(password)
+        .args(["extract", "--password-stdin", "-C"])
         .arg(&extract_dir)
         .arg(&archive_path)
         .assert()
@@ -807,7 +841,9 @@ fn test_zstd_encryption_performance_comparison() -> Result<()> {
     // Create encrypted archive
     let start = std::time::Instant::now();
     zzz_cmd()
-        .args(["compress", "--password", "perftest", "-f", "zst", "-o"])
+        .write_stdin("perftest")
+        .args(["compress", "--password-stdin", "--kdf", "lo"])
+        .args(["-f", "zst", "-o"])
         .arg(&encrypted_archive)
         .arg(&input_file)
         .assert()
@@ -851,7 +887,9 @@ fn test_zstd_encryption_format_validation() -> Result<()> {
     // Create encrypted archive
     let archive_path = tmp_dir.path().join("format_test.zst");
     zzz_cmd()
-        .args(["compress", "--password", "formattest", "-f", "zst", "-o"])
+        .write_stdin("formattest")
+        .args(["compress", "--password-stdin", "--kdf", "lo"])
+        .args(["-f", "zst", "-o"])
         .arg(&archive_path)
         .arg(&input_file)
         .assert()
@@ -864,13 +902,16 @@ fn test_zstd_encryption_format_validation() -> Result<()> {
         "Archive should have reasonable size"
     );
 
-    // Check for our custom magic header "ZSTDECRYPT1"
-    let magic_header = b"ZSTDECRYPT1";
+    // Check the versioned header and persisted low-cost parameters.
+    let magic_header = b"ZSTDECRYPT2";
     assert_eq!(
         &archive_data[0..magic_header.len()],
         magic_header,
-        "Archive should start with ZSTDECRYPT1 magic header"
+        "Archive should start with ZSTDECRYPT2 magic header"
     );
+    assert_eq!(&archive_data[11..15], &(256_u32 * 1024).to_be_bytes());
+    assert_eq!(&archive_data[15..19], &3_u32.to_be_bytes());
+    assert_eq!(&archive_data[19..23], &4_u32.to_be_bytes());
 
     // Verify it's not a standard ZSTD file (which would start with 0x28, 0xB5, 0x2F, 0xFD)
     let zstd_magic = &[0x28, 0xB5, 0x2F, 0xFD];

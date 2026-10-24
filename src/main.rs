@@ -16,7 +16,7 @@ fn main() {
     let cli = Cli::parse();
 
     if let Err(e) = run(cli) {
-        eprintln!("error: {e}");
+        eprintln!("error: {e:#}");
         process::exit(1);
     }
 }
@@ -39,11 +39,28 @@ fn run(cli: Cli) -> zzz_arc::Result<()> {
             format,
             overwrite,
             password,
+            kdf,
         } => {
             let output_path = Cli::get_output_path(&input, output, format)?;
+            if kdf.is_some() {
+                if !password.is_requested() {
+                    anyhow::bail!("--kdf requires -p/--password or --password-stdin");
+                }
+                if format.or_else(|| zzz_arc::formats::Format::from_extension(&output_path))
+                    != Some(zzz_arc::formats::Format::Zstd)
+                {
+                    anyhow::bail!("--kdf is only supported for encrypted zst archives");
+                }
+            }
 
             // check if output already exists and prompt user
             if output_path.exists() && !overwrite {
+                if password.uses_stdin() {
+                    anyhow::bail!(
+                        "output file '{}' already exists; use --overwrite to replace it",
+                        output_path.display()
+                    );
+                }
                 let prompt_message = format!(
                     "output file '{}' already exists. overwrite?",
                     output_path.display()
@@ -54,7 +71,8 @@ fn run(cli: Cli) -> zzz_arc::Result<()> {
                 }
             }
 
-            let policy = CompressPolicy::resolve(CompressPolicyInputs {
+            let password = password.resolve(true)?;
+            let mut policy = CompressPolicy::resolve(CompressPolicyInputs {
                 level,
                 threads: cli.threads,
                 password,
@@ -67,6 +85,7 @@ fn run(cli: Cli) -> zzz_arc::Result<()> {
                 use_default_excludes: !no_default_excludes,
                 exclude_patterns: exclude,
             })?;
+            policy.options.kdf = kdf.unwrap_or_default();
             let filter = build_filter(&policy.filters)?;
 
             let stats = compress::compress(
@@ -103,6 +122,7 @@ fn run(cli: Cli) -> zzz_arc::Result<()> {
             password,
         } => {
             let extract_dir = Cli::get_extract_dir(destination, directory);
+            let password = password.resolve(false)?;
 
             let policy = ExtractPolicy::resolve(ExtractPolicyInputs {
                 overwrite,

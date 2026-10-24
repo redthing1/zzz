@@ -54,6 +54,7 @@ pub struct CompressionOptions {
     pub symlink_policy: SymlinkPolicy,
     pub deterministic: bool, // sort files for reproducible archives
     pub password: Option<String>,
+    pub kdf: crate::encryption::KdfPreset,
 }
 
 impl Default for CompressionOptions {
@@ -68,6 +69,7 @@ impl Default for CompressionOptions {
             symlink_policy: SymlinkPolicy::Skip,
             deterministic: true,
             password: None,
+            kdf: crate::encryption::KdfPreset::default(),
         }
     }
 }
@@ -165,6 +167,10 @@ impl Format {
         })?;
         let mut buffer = [0u8; 16];
         let bytes_read = file.read(&mut buffer)?;
+
+        if crate::encryption::is_encrypted_zstd(&buffer[..bytes_read]) {
+            return Ok(Format::Zstd);
+        }
 
         if bytes_read >= 4 {
             // Check magic numbers
